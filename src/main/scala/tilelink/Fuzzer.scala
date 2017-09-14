@@ -108,12 +108,10 @@ class TLFuzzer(
 
   lazy val module = new LazyModuleImp(this) {
     val io = new Bundle {
-      val out = node.bundleOut
       val finished = Bool(OUTPUT)
     }
 
-    val out = io.out(0)
-    val edge = node.edgesOut(0)
+    val (out, edge) = node.out(0)
 
     // Extract useful parameters from the TL edge
     val maxTransfer  = edge.manager.maxTransfer

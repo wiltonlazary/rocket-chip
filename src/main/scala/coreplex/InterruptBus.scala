@@ -44,7 +44,7 @@ abstract trait HasExtInterrupts extends HasInterruptBus {
   }
 
   val nExtInterrupts = p(NExtTopInterrupts)
-  val extInterrupts = IntInternalInputNode(IntSourcePortSimple(num = nExtInterrupts, resources = device.int))
+  val extInterrupts = IntSourceNode(IntSourcePortSimple(num = nExtInterrupts, resources = device.int))
 }
 
 /** This trait should be used if the External Interrupts have NOT
@@ -81,5 +81,5 @@ trait HasExtInterruptsModuleImp extends LazyMultiIOModuleImp with HasExtInterrup
   val outer: HasExtInterrupts
   val interrupts = IO(UInt(INPUT, width = outer.nExtInterrupts))
 
-  outer.extInterrupts.bundleIn.flatten.zipWithIndex.foreach { case(o, i) => o := interrupts(i) }
+  outer.extInterrupts.in.map(_._1).flatten.zipWithIndex.foreach { case(o, i) => o := interrupts(i) }
 }

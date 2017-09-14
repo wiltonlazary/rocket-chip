@@ -52,13 +52,8 @@ class TLToAXI4(beatBytes: Int, combinational: Boolean = true, adapterName: Optio
 {
   val node = TLToAXI4Node(beatBytes, stripBits)
 
-  lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
-      val in = node.bundleIn
-      val out = node.bundleOut
-    }
-
-    ((io.in zip io.out) zip (node.edgesIn zip node.edgesOut)) foreach { case ((in, out), (edgeIn, edgeOut)) =>
+  lazy val module = new LazyMultiIOModuleImp(this) {
+    (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       val slaves  = edgeOut.slave.slaves
 
       // All pairs of slaves must promise that they will never interleave data

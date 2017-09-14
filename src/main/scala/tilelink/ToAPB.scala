@@ -37,13 +37,8 @@ class TLToAPB(val aFlow: Boolean = true)(implicit p: Parameters) extends LazyMod
 {
   val node = TLToAPBNode()
 
-  lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
-      val in = node.bundleIn
-      val out = node.bundleOut
-    }
-
-    ((io.in zip io.out) zip (node.edgesIn zip node.edgesOut)) foreach { case ((in, out), (edgeIn, edgeOut)) =>
+  lazy val module = new LazyMultiIOModuleImp(this) {
+    (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       val beatBytes = edgeOut.slave.beatBytes
       val lgBytes = log2Ceil(beatBytes)
 

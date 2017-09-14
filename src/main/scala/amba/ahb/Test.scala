@@ -42,7 +42,7 @@ class AHBNativeTest(aFlow: Boolean, txns: Int = 5000, timeout: Int = 500000)(imp
 
 class AHBFuzzMaster(aFlow: Boolean, txns: Int)(implicit p: Parameters) extends LazyModule
 {
-  val node  = AHBOutputNode()
+  val node  = AHBIdentityNode()
   val fuzz  = LazyModule(new TLFuzzer(txns))
   val model = LazyModule(new TLRAMModel("AHBFuzzMaster"))
 
@@ -56,7 +56,6 @@ class AHBFuzzMaster(aFlow: Boolean, txns: Int)(implicit p: Parameters) extends L
 
   lazy val module = new LazyModuleImp(this) {
     val io = new Bundle {
-      val out = node.bundleOut
       val finished = Bool(OUTPUT)
     }
 
@@ -66,7 +65,7 @@ class AHBFuzzMaster(aFlow: Boolean, txns: Int)(implicit p: Parameters) extends L
 
 class AHBFuzzSlave()(implicit p: Parameters) extends LazyModule
 {
-  val node = AHBInputNode()
+  val node = AHBIdentityNode()
   val ram  = LazyModule(new TLTestRAM(AddressSet(0x0, 0xfff)))
 
   ram.node :=
@@ -77,11 +76,7 @@ class AHBFuzzSlave()(implicit p: Parameters) extends LazyModule
     AHBToTL()(
     node)))))
 
-  lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
-      val in = node.bundleIn
-    }
-  }
+  lazy val module = new LazyMultiIOModuleImp(this) { }
 }
 
 class AHBFuzzBridge(aFlow: Boolean, txns: Int)(implicit p: Parameters) extends LazyModule

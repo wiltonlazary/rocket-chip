@@ -15,13 +15,8 @@ class TLHintHandler(supportManagers: Boolean = true, supportClients: Boolean = f
     clientFn  = { c => if (!supportClients)  c else c.copy(minLatency = min(1, c.minLatency), clients  = c.clients .map(_.copy(supportsHint = TransferSizes(1, c.maxTransfer)))) },
     managerFn = { m => if (!supportManagers) m else m.copy(minLatency = min(1, m.minLatency), managers = m.managers.map(_.copy(supportsHint = TransferSizes(1, m.maxTransfer)))) })
 
-  lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
-      val in  = node.bundleIn
-      val out = node.bundleOut
-    }
-
-    ((io.in zip io.out) zip (node.edgesIn zip node.edgesOut)) foreach { case ((in, out), (edgeIn, edgeOut)) =>
+  lazy val module = new LazyMultiIOModuleImp(this) {
+    (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       // Don't add support for clients if there is no BCE channel
       val bce = edgeOut.manager.anySupportAcquireB && edgeIn.client.anySupportProbe
       require (!supportClients || bce)

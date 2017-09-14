@@ -21,16 +21,12 @@ class AHBRAM(address: AddressSet, executable: Boolean = true, beatBytes: Int = 4
   // We require the address range to include an entire beat (for the write mask)
   require ((address.mask & (beatBytes-1)) == beatBytes-1)
 
-  lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
-      val in = node.bundleIn
-    }
-
+  lazy val module = new LazyMultiIOModuleImp(this) {
     def bigBits(x: BigInt, tail: List[Boolean] = List.empty[Boolean]): List[Boolean] =
       if (x == 0) tail.reverse else bigBits(x >> 1, ((x & 1) == 1) :: tail)
     val mask = bigBits(address.mask >> log2Ceil(beatBytes))
 
-    val in = io.in(0)
+    val (in, _) = node.in(0)
 
     // The mask and address during the address phase
     val a_access    = in.htrans === AHBParameters.TRANS_NONSEQ || in.htrans === AHBParameters.TRANS_SEQ

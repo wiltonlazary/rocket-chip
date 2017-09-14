@@ -69,7 +69,7 @@ trait HasFuzzTarget {
 
 class AXI4FuzzMaster(txns: Int)(implicit p: Parameters) extends LazyModule with HasFuzzTarget
 {
-  val node  = AXI4OutputNode()
+  val node  = AXI4IdentityNode()
   val fuzz  = LazyModule(new TLFuzzer(txns, overrideAddress = Some(fuzzAddr)))
   val model = LazyModule(new TLRAMModel("AXI4FuzzMaster"))
 
@@ -85,7 +85,6 @@ class AXI4FuzzMaster(txns: Int)(implicit p: Parameters) extends LazyModule with 
 
   lazy val module = new LazyModuleImp(this) {
     val io = new Bundle {
-      val out = node.bundleOut
       val finished = Bool(OUTPUT)
     }
 
@@ -95,7 +94,7 @@ class AXI4FuzzMaster(txns: Int)(implicit p: Parameters) extends LazyModule with 
 
 class AXI4FuzzSlave()(implicit p: Parameters) extends LazyModule with HasFuzzTarget
 {
-  val node = AXI4InputNode()
+  val node = AXI4IdentityNode()
   val xbar = LazyModule(new TLXbar)
   val ram  = LazyModule(new TLRAM(fuzzAddr))
   val error= LazyModule(new TLError(ErrorParams(Seq(AddressSet(0x1800, 0xff)), maxTransfer = 256)))
@@ -114,11 +113,7 @@ class AXI4FuzzSlave()(implicit p: Parameters) extends LazyModule with HasFuzzTar
     AXI4IdIndexer(2)(
     node))))))))
 
-  lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
-      val in = node.bundleIn
-    }
-  }
+  lazy val module = new LazyMultiIOModuleImp(this) { }
 }
 
 class AXI4FuzzBridge(txns: Int)(implicit p: Parameters) extends LazyModule

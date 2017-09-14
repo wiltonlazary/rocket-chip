@@ -39,16 +39,11 @@ class TLError(params: ErrorParams, beatBytes: Int = 4)(implicit p: Parameters) e
     endSinkId  = 1, // can receive GrantAck
     minLatency = 1))) // no bypass needed for this device
 
-  lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
-      val in = node.bundleIn
-    }
-
+  lazy val module = new LazyMultiIOModuleImp(this) {
     import TLMessages._
     import TLPermissions._
 
-    val edge = node.edgesIn(0)
-    val in = io.in(0)
+    val (in, edge) = node.in(0)
     val a = Queue(in.a, 1)
     val c = Queue(in.c, 1)
     val da = Wire(in.d)

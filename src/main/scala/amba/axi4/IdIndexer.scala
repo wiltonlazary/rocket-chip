@@ -41,13 +41,8 @@ class AXI4IdIndexer(idBits: Int)(implicit p: Parameters) extends LazyModule
     slaveFn = { sp => sp
     })
 
-  lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
-      val in  = node.bundleIn
-      val out = node.bundleOut
-    }
-
-    ((io.in zip io.out) zip (node.edgesIn zip node.edgesOut)) foreach { case ((in, out), (edgeIn, edgeOut)) =>
+  lazy val module = new LazyMultiIOModuleImp(this) {
+    (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
 
       // Leave everything mostly untouched
       out.ar <> in.ar

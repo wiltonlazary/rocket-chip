@@ -71,14 +71,13 @@ abstract class BareTileModule[+L <: BareTile, +B <: BareTileBundle[L]](_outer: L
 trait HasTileLinkMasterPort {
   implicit val p: Parameters
   val module: HasTileLinkMasterPortModule
-  val masterNode = TLOutputNode()
+  val masterNode = TLIdentityNode()
   val tileBus = LazyModule(new TLXbar) // TileBus xbar for cache backends to connect to
   masterNode := tileBus.node
 }
 
 trait HasTileLinkMasterPortBundle {
   val outer: HasTileLinkMasterPort
-  val master = outer.masterNode.bundleOut
 }
 
 trait HasTileLinkMasterPortModule {

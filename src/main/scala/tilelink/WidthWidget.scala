@@ -16,12 +16,7 @@ class TLWidthWidget(innerBeatBytes: Int)(implicit p: Parameters) extends LazyMod
     clientFn  = { case c => c },
     managerFn = { case m => m.copy(beatBytes = innerBeatBytes) })
 
-  lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
-      val in  = node.bundleIn
-      val out = node.bundleOut
-    }
-
+  lazy val module = new LazyMultiIOModuleImp(this) {
     def merge[T <: TLDataChannel](edgeIn: TLEdge, in: DecoupledIO[T], edgeOut: TLEdge, out: DecoupledIO[T]) = {
       val inBytes = edgeIn.manager.beatBytes
       val outBytes = edgeOut.manager.beatBytes
@@ -154,7 +149,7 @@ class TLWidthWidget(innerBeatBytes: Int)(implicit p: Parameters) extends LazyMod
       }
     }
 
-    ((io.in zip io.out) zip (node.edgesIn zip node.edgesOut)) foreach { case ((in, out), (edgeIn, edgeOut)) =>
+    (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
 
       // If the master is narrower than the slave, the D channel must be narrowed.
       // This is tricky, because the D channel has no address data.

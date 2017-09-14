@@ -288,12 +288,10 @@ class TLDebugModuleOuter(device: Device)(implicit p: Parameters) extends LazyMod
 
   lazy val module = new LazyModuleImp(this) {
 
-    val nComponents = intnode.bundleOut.size
+    val nComponents = intnode.out.size
 
     val io = new Bundle {
       val ctrl = (new DebugCtrlBundle(nComponents))
-      val tlIn = dmiNode.bundleIn
-      val debugInterrupts = intnode.bundleOut
       val innerCtrl = new DecoupledIO(new DebugInternalBundle())
     }
 
@@ -356,7 +354,7 @@ class TLDebugModuleOuter(device: Device)(implicit p: Parameters) extends LazyMod
     debugIntNxt := debugIntRegs
 
     for (component <- 0 until nComponents) {
-      io.debugInterrupts(component)(0) := debugIntRegs(component)
+      intnode.out(component)._1(0) := debugIntRegs(component)
     }
 
     // Halt request registers are set & cleared by writes to DMCONTROL.haltreq
@@ -393,9 +391,9 @@ class TLDebugModuleOuterAsync(device: Device)(implicit p: Parameters) extends La
   val dmiXbar = LazyModule (new TLXbar())
 
   val dmOuter = LazyModule( new TLDebugModuleOuter(device))
-  val intnode = IntOutputNode()
+  val intnode = IntIdentityNode()
 
-  val dmiInnerNode = TLAsyncOutputNode()
+  val dmiInnerNode = TLAsyncIdentityNode()
 
   intnode :*= dmOuter.intnode
 
@@ -405,13 +403,11 @@ class TLDebugModuleOuterAsync(device: Device)(implicit p: Parameters) extends La
   
   lazy val module = new LazyModuleImp(this) {
 
-    val nComponents = intnode.bundleOut.size
+    val nComponents = intnode.out.size
 
     val io = new Bundle {
       val dmi   = new DMIIO()(p).flip()
-      val dmiInner = dmiInnerNode.bundleOut
       val ctrl = new DebugCtrlBundle(nComponents)
-      val debugInterrupts = intnode.bundleOut
       val innerCtrl = new AsyncBundle(depth=1, new DebugInternalBundle())
     }
 
@@ -448,8 +444,6 @@ class TLDebugModuleInner(device: Device, getNComponents: () => Int)(implicit p: 
     val nComponents = getNComponents()
 
     val io = new Bundle {
-      val hart_in = tlNode.bundleIn
-      val dmi_in = dmiNode.bundleIn
       val dmactive = Bool(INPUT)
       val innerCtrl = (new DecoupledIO(new DebugInternalBundle())).flip
       val debugUnavail = Vec(nComponents, Bool()).asInput
@@ -1012,8 +1006,8 @@ class TLDebugModuleInner(device: Device, getNComponents: () => Int)(implicit p: 
 class TLDebugModuleInnerAsync(device: Device, getNComponents: () => Int)(implicit p: Parameters) extends LazyModule{
 
   val dmInner = LazyModule(new TLDebugModuleInner(device, getNComponents)(p))
-  val dmiNode = TLAsyncInputNode()
-  val tlNode = TLInputNode()
+  val dmiNode = TLAsyncIdentityNode()
+  val tlNode = TLIdentityNode()
 
   dmInner.dmiNode := TLAsyncCrossingSink(depth=1)(dmiNode)
   dmInner.tlNode  := tlNode
@@ -1022,9 +1016,7 @@ class TLDebugModuleInnerAsync(device: Device, getNComponents: () => Int)(implici
 
     val io = new Bundle {
       // this comes from tlClk domain.
-      val tl_in = tlNode.bundleIn
       // These are all asynchronous and come from Outer
-      val dmi_in = dmiNode.bundleIn
       val dmactive = Bool(INPUT)
       val innerCtrl = new AsyncBundle(1, new DebugInternalBundle()).flip
       // This comes from tlClk domain.
@@ -1049,24 +1041,22 @@ class TLDebugModule(implicit p: Parameters) extends LazyModule {
     override val alwaysExtended = true
   }
 
-  val node = TLInputNode()
-  val intnode = IntOutputNode()
+  val node = TLIdentityNode()
+  val intnode = IntIdentityNode()
 
   val dmOuter = LazyModule(new TLDebugModuleOuterAsync(device)(p))
-  val dmInner = LazyModule(new TLDebugModuleInnerAsync(device, () => {intnode.bundleOut.size})(p))
+  val dmInner = LazyModule(new TLDebugModuleInnerAsync(device, () => {intnode.edges._2.size})(p))
 
   dmInner.dmiNode := dmOuter.dmiInnerNode
   dmInner.tlNode := node
   intnode :*= dmOuter.intnode
 
   lazy val module = new LazyModuleImp(this) {
-    val nComponents = intnode.bundleOut.size
+    val nComponents = intnode.out.size
 
     val io = new Bundle {
       val ctrl = new DebugCtrlBundle(nComponents)
       val dmi = new ClockedDMIIO().flip
-      val in = node.bundleIn
-      val debugInterrupts = intnode.bundleOut
     }
 
     dmOuter.module.io.dmi <> io.dmi.dmi
@@ -1099,16 +1089,14 @@ class ClockedDMIIO(implicit val p: Parameters) extends ParameterizedBundle()(p){
 
 class DMIToTL(implicit p: Parameters) extends LazyModule {
 
-  val node = TLClientNode(TLClientParameters("debug"))
+  val node = TLClientNode(Seq(TLClientPortParameters(Seq(TLClientParameters("debug")))))
 
   lazy val module = new LazyModuleImp(this) {
     val io = new Bundle {
       val dmi = new DMIIO()(p).flip()
-      val out = node.bundleOut
     }
 
-    val tl = io.out(0)
-    val edge = node.edgesOut(0)
+    val (tl, edge) = node.out(0)
 
     val src  = Wire(init = 0.U)
     val addr = Wire(init = (io.dmi.req.bits.addr << 2))

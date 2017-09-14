@@ -31,12 +31,10 @@ class ScratchpadSlavePort(address: AddressSet, coreDataBytes: Int, usingAtomics:
 
   lazy val module = new LazyModuleImp(this) {
     val io = new Bundle {
-      val tl_in = node.bundleIn
       val dmem = new HellaCacheIO
     }
 
-    val tl_in = io.tl_in(0)
-    val edge = node.edgesIn(0)
+    val (tl_in, edge) = node.in(0)
 
     val s_ready :: s_wait :: s_replay :: s_grant :: Nil = Enum(UInt(), 4)
     val state = Reg(init = s_ready)
@@ -100,7 +98,7 @@ trait CanHaveScratchpad extends HasHellaCache with HasICacheFrontend {
   val module: CanHaveScratchpadModule
   val cacheBlockBytes = p(CacheBlockBytes)
 
-  val slaveNode = TLInputNode() // Up to two uses for this input node:
+  val slaveNode = TLIdentityNode() // Up to two uses for this input node:
 
   // 1) Frontend always exists, but may or may not have a scratchpad node
   // 2) ScratchpadSlavePort always has a node, but only exists when the HellaCache has a scratchpad
@@ -118,7 +116,7 @@ trait CanHaveScratchpad extends HasHellaCache with HasICacheFrontend {
   }
 
   def findScratchpadFromICache: Option[AddressSet] = scratch.map { s =>
-    val finalNode = frontend.masterNode.edgesOut.head.manager.managers.find(_.nodePath.last == s.node)
+    val finalNode = frontend.masterNode.out.head._2.manager.managers.find(_.nodePath.last == s.node)
     require (finalNode.isDefined, "Could not find the scratch pad; not reachable via icache?")
     require (finalNode.get.address.size == 1, "Scratchpad address space was fragmented!")
     finalNode.get.address(0)
@@ -129,7 +127,6 @@ trait CanHaveScratchpad extends HasHellaCache with HasICacheFrontend {
 
 trait CanHaveScratchpadBundle extends HasHellaCacheBundle with HasICacheFrontendBundle {
   val outer: CanHaveScratchpad
-  val slave = outer.slaveNode.bundleIn
 }
 
 trait CanHaveScratchpadModule extends HasHellaCacheModule with HasICacheFrontendModule {

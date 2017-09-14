@@ -51,13 +51,8 @@ class TLFragmenter(val minSize: Int, val maxSize: Int, val alwaysMin: Boolean = 
       requestFifo = true))) },
     managerFn = { m => m.copy(managers = m.managers.map(mapManager)) })
 
-  lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
-      val in  = node.bundleIn
-      val out = node.bundleOut
-    }
-
-    ((io.in zip io.out) zip (node.edgesIn zip node.edgesOut)) foreach { case ((in, out), (edgeIn, edgeOut)) =>
+  lazy val module = new LazyMultiIOModuleImp(this) {
+    (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       // All managers must share a common FIFO domain (responses might end up interleaved)
       val manager   = edgeOut.manager
       val managers  = manager.managers
@@ -249,7 +244,7 @@ class TLFragmenter(val minSize: Int, val maxSize: Int, val alwaysMin: Boolean = 
       val aFrag = Mux(aOrig > limit, limit, aOrig)
       val aOrigOH1 = UIntToOH1(aOrig, log2Ceil(maxSize))
       val aFragOH1 = UIntToOH1(aFrag, log2Up(maxDownSize))
-      val aHasData = node.edgesIn(0).hasData(in_a.bits)
+      val aHasData = edgeIn.hasData(in_a.bits)
       val aMask = Mux(aHasData, UInt(0), aFragOH1)
 
       val gennum = RegInit(UInt(0, width = counterBits))
