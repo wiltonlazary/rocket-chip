@@ -80,7 +80,7 @@ class BusBlocker(params: BusBlockerParams)(implicit p: Parameters) extends TLBus
     device    = device,
     beatBytes = params.controlBeatBytes)
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     // We need to be able to represent +1 larger than the largest populated address
     val addressBits = log2Ceil(nodeOut.out(0)._2.manager.maxAddress+1+1)
     val pmps = RegInit(Vec.fill(params.pmpRegisters) { DevicePMP(addressBits, params.pageBits) })

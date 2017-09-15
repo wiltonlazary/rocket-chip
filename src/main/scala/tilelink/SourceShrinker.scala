@@ -22,7 +22,7 @@ class TLSourceShrinker(maxInFlight: Int)(implicit p: Parameters) extends LazyMod
     clientFn  = { _ => TLClientPortParameters(clients = Seq(client)) },
     managerFn = { mp => mp.copy(managers = mp.managers.map(_.copy(fifoId = None)))  })
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       // Acquires cannot pass this adapter; it makes Probes impossible
       require (!edgeIn.client.anySupportProbe || 

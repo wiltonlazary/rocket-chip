@@ -33,7 +33,7 @@ class TLROM(val base: BigInt, val size: Int, contentsDelayed: => Seq[Byte], exec
       fifoId      = Some(0))),
     beatBytes = beatBytes)))
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     val contents = contentsDelayed
     val wrapSize = 1 << log2Ceil(contents.size)
     require (wrapSize <= size)
@@ -75,7 +75,7 @@ trait HasPeripheryBootROM extends HasPeripheryBus {
 }
 
 /** Coreplex will power-on running at 0x10040 (BootROM) */
-trait HasPeripheryBootROMModuleImp extends LazyMultiIOModuleImp
+trait HasPeripheryBootROMModuleImp extends LazyModuleImp
     with HasResetVectorWire {
   val outer: HasPeripheryBootROM
   global_reset_vector := outer.resetVector.U

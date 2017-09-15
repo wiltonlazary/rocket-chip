@@ -96,7 +96,7 @@ trait HasRocketTilesBundle {
   val rocket_tile_inputs: Vec[ClockedRocketTileInputs]
 }
 
-trait HasRocketTilesModuleImp extends LazyMultiIOModuleImp
+trait HasRocketTilesModuleImp extends LazyModuleImp
     with HasRocketTilesBundle
     with HasResetVectorWire
     with HasPeripheryDebugModuleImp {

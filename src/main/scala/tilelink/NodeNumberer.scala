@@ -42,7 +42,7 @@ class TLNodeNumberer(nodeAddressOffset: Option[Int] = None)(implicit p: Paramete
 {
   val node = TLNodeNumbererNode(nodeAddressOffset)
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     val minNodeOffset = log2Ceil(node.out.map(_._2.manager.maxAddress).max)
     val nodeOffset = nodeAddressOffset.getOrElse(minNodeOffset)
 

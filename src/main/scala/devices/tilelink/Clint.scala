@@ -53,9 +53,9 @@ class CoreplexLocalInterrupter(params: ClintParams)(implicit p: Parameters) exte
     sinkFn         = { _ => IntSinkPortParameters(Seq(IntSinkParameters())) })
 
   lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
+    val io = IO(new Bundle {
       val rtcTick = Bool(INPUT)
-    }
+    })
 
     val time = Seq.fill(timeWidth/regWidth)(Reg(init=UInt(0, width = regWidth)))
     when (io.rtcTick) {

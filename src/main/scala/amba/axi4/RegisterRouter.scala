@@ -99,7 +99,7 @@ class AXI4RegBundle[P](val params: P, arg: AXI4RegBundleArg) extends AXI4RegBund
 class AXI4RegModule[P, B <: AXI4RegBundleBase](val params: P, bundleBuilder: => B, router: AXI4RegisterRouterBase)
   extends LazyModuleImp(router) with HasRegMap
 {
-  val io = bundleBuilder
+  val io = IO(bundleBuilder)
   val interrupts = if (router.intnode.in.isEmpty) Vec(0, Bool()) else router.intnode.in(0)._1
   def regmap(mapping: RegField.Map*) = router.node.regmap(mapping:_*)
 }

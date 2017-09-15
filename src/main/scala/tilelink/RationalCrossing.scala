@@ -19,7 +19,7 @@ class TLRationalCrossingSource(implicit p: Parameters) extends LazyModule
 {
   val node = TLRationalSourceNode()
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       val bce = edgeIn.manager.anySupportAcquireB && edgeIn.client.anySupportProbe
       val direction = edgeOut.manager.direction
@@ -50,7 +50,7 @@ class TLRationalCrossingSink(direction: RationalDirection = Symmetric)(implicit 
 {
   val node = TLRationalSinkNode(direction)
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       val bce = edgeOut.manager.anySupportAcquireB && edgeOut.client.anySupportProbe
       val direction = edgeIn.manager.direction
@@ -111,12 +111,12 @@ class TLRationalCrossing(direction: RationalDirection = Symmetric)(implicit p: P
   val out  = (nodeOut := sink.node)
 
   lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
+    val io = IO(new Bundle {
       val in_clock  = Clock(INPUT)
       val in_reset  = Bool(INPUT)
       val out_clock = Clock(INPUT)
       val out_reset = Bool(INPUT)
-    }
+    })
 
     source.module.clock := io.in_clock
     source.module.reset := io.in_reset
@@ -146,9 +146,9 @@ class TLRAMRationalCrossingSource(name: String, txns: Int)(implicit p: Parameter
   node := TLRationalCrossingSource()(TLDelayer(0.25)(model.node))
 
   lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
+    val io = IO(new Bundle {
       val finished = Bool(OUTPUT)
-    }
+    })
     io.finished := fuzz.module.io.finished
   }
 }
@@ -159,7 +159,7 @@ class TLRAMRationalCrossingSink(direction: RationalDirection)(implicit p: Parame
 
   ram.node := TLFragmenter(4, 256)(TLDelayer(0.25)(TLRationalCrossingSink(direction)(node)))
 
-  lazy val module = new LazyMultiIOModuleImp(this) { }
+  lazy val module = new LazyModuleImp(this) { }
 }
 
 class TLRAMRationalCrossing(txns: Int)(implicit p: Parameters) extends LazyModule {
@@ -179,7 +179,7 @@ class TLRAMRationalCrossing(txns: Int)(implicit p: Parameters) extends LazyModul
   val fix_fast_sink   = LazyModule(new TLRAMRationalCrossingSink(SlowToFast))
   fix_fast_sink.node := fix_slow_source.node
 
-  lazy val module = new LazyModuleImp(this) with HasUnitTestIO {
+  lazy val module = new LazyModuleImp(this) with UnitTestModule {
     io.finished :=
       sym_fast_source.module.io.finished &&
       sym_slow_source.module.io.finished &&

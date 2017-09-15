@@ -109,7 +109,7 @@ class IntXbar()(implicit p: Parameters) extends LazyModule
       }.flatten)
     })
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     val cat = intnode.in.map { case (i, e) => i.take(e.source.num) }.flatten
     intnode.out.foreach { case (o, _) => o := cat }
   }
@@ -119,7 +119,7 @@ class IntXing(sync: Int = 3)(implicit p: Parameters) extends LazyModule
 {
   val intnode = IntAdapterNode()
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     (intnode.in zip intnode.out) foreach { case ((in, _), (out, _)) =>
       out := SynchronizerShiftReg(in, sync)
     }

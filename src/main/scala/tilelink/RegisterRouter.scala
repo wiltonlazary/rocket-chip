@@ -104,7 +104,7 @@ class TLRegBundle[P](val params: P, arg: TLRegBundleArg)(implicit p: Parameters)
 class TLRegModule[P, B <: TLRegBundleBase](val params: P, bundleBuilder: => B, router: TLRegisterRouterBase)
   extends LazyModuleImp(router) with HasRegMap
 {
-  val io = bundleBuilder
+  val io = IO(bundleBuilder)
   val interrupts = if (router.intnode.in.isEmpty) Vec(0, Bool()) else router.intnode.in(0)._1
   val address = router.address
   def regmap(mapping: RegField.Map*) = router.node.regmap(mapping:_*)

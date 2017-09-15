@@ -15,7 +15,7 @@ class AHBFanout()(implicit p: Parameters) extends LazyModule {
     masterFn = { case Seq(m) => m },
     slaveFn  = { seq => seq(0).copy(slaves = seq.flatMap(_.slaves)) })
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     // Require consistent bus widths
     val (io_out, edgesOut) = node.out.unzip
     val port0 = edgesOut(0).slave

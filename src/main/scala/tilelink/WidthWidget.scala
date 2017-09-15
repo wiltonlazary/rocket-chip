@@ -16,7 +16,7 @@ class TLWidthWidget(innerBeatBytes: Int)(implicit p: Parameters) extends LazyMod
     clientFn  = { case c => c },
     managerFn = { case m => m.copy(beatBytes = innerBeatBytes) })
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     def merge[T <: TLDataChannel](edgeIn: TLEdge, in: DecoupledIO[T], edgeOut: TLEdge, out: DecoupledIO[T]) = {
       val inBytes = edgeIn.manager.beatBytes
       val outBytes = edgeOut.manager.beatBytes
@@ -215,7 +215,7 @@ class TLRAMWidthWidget(first: Int, second: Int, txns: Int)(implicit p: Parameter
                   TLWidthWidget(second)(
                     TLWidthWidget(first)(TLDelayer(0.1)(model.node)))}))
 
-  lazy val module = new LazyModuleImp(this) with HasUnitTestIO {
+  lazy val module = new LazyModuleImp(this) with UnitTestModule {
     io.finished := fuzz.module.io.finished
   }
 }

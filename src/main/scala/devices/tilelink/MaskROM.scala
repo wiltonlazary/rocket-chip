@@ -34,7 +34,7 @@ class TLMaskROM(c: MaskROMParams)(implicit p: Parameters) extends LazyModule {
       fifoId             = Some(0))), // requests are handled in order
     beatBytes = beatBytes)))
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     val (in, edge)= node.in(0)
 
     val rom = ROMGenerator(ROMConfig(c.name, c.depth, c.width))

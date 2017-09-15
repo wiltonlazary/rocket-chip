@@ -21,7 +21,7 @@ class AXI4UserYanker(capMaxFlight: Option[Int] = None)(implicit p: Parameters) e
           case (None,    None)    => None })})},
     slaveFn = { sp => sp })
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       val bits = edgeIn.bundle.userBits
       val need_bypass = edgeOut.slave.minLatency < 1

@@ -38,10 +38,10 @@ class TLPatternPusher(name: String, pattern: Seq[Pattern])(implicit p: Parameter
   val node = TLClientNode(Seq(TLClientPortParameters(Seq(TLClientParameters(name = name)))))
 
   lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
+    val io = IO(new Bundle {
       val run = Bool(INPUT)
       val done = Bool(OUTPUT)
-    }
+    })
 
     val (tl_out, edgeOut) = node.out(0)
     pattern.foreach { p =>

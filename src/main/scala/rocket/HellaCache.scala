@@ -182,7 +182,7 @@ class HellaCacheModule(outer: HellaCache) extends LazyModuleImp(outer)
     with HasL1HellaCacheParameters {
   implicit val edge = outer.node.out(0)._2
   val tl_out = outer.node.out(0)._1
-  val io = new HellaCacheBundle(outer)
+  val io = IO(new HellaCacheBundle(outer))
 
   private val fifoManagers = edge.manager.managers.filter(TLFIFOFixer.allUncacheable)
   fifoManagers.foreach { m =>

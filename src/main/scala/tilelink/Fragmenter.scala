@@ -51,7 +51,7 @@ class TLFragmenter(val minSize: Int, val maxSize: Int, val alwaysMin: Boolean = 
       requestFifo = true))) },
     managerFn = { m => m.copy(managers = m.managers.map(mapManager)) })
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       // All managers must share a common FIFO domain (responses might end up interleaved)
       val manager   = edgeOut.manager
@@ -312,7 +312,7 @@ class TLRAMFragmenter(ramBeatBytes: Int, maxSize: Int, txns: Int)(implicit p: Pa
     TLBuffer(BufferParams.flow)(
     model.node)))))))))
 
-  lazy val module = new LazyModuleImp(this) with HasUnitTestIO {
+  lazy val module = new LazyModuleImp(this) with UnitTestModule {
     io.finished := fuzz.module.io.finished
   }
 }

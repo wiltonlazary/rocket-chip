@@ -21,7 +21,7 @@ class APBRAM(address: AddressSet, executable: Boolean = true, beatBytes: Int = 4
   // We require the address range to include an entire beat (for the write mask)
   require ((address.mask & (beatBytes-1)) == beatBytes-1)
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     val (in, _) = node.in(0)
 
     def bigBits(x: BigInt, tail: List[Boolean] = List.empty[Boolean]): List[Boolean] =

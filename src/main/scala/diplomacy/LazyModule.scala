@@ -169,11 +169,7 @@ sealed trait LazyModuleImpLike extends BaseModule
   }
 }
 
-abstract class LazyModuleImp(val wrapper: LazyModule) extends Module with LazyModuleImpLike {
-  val (auto, dangles) = instantiate()
-}
-
-abstract class LazyMultiIOModuleImp(val wrapper: LazyModule) extends MultiIOModule with LazyModuleImpLike {
+abstract class LazyModuleImp(val wrapper: LazyModule) extends MultiIOModule with LazyModuleImpLike {
   val (auto, dangles) = instantiate()
 }
 

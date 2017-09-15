@@ -25,7 +25,7 @@ class AXI4Fragmenter()(implicit p: Parameters) extends LazyModule
     masterFn = { mp => mp.copy(masters = mp.masters.map(m => mapMaster(m)), userBits = mp.userBits + 1) },
     slaveFn  = { sp => sp.copy(slaves  = sp.slaves .map(s => mapSlave(s, sp.beatBytes))) })
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       val slave     = edgeOut.slave
       val slaves    = slave.slaves

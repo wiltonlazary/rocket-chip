@@ -72,7 +72,7 @@ class RoCCIO(outer: LazyRoCC)(implicit p: Parameters) extends RoCCCoreIO()(p) {
 }
 
 class LazyRoCCModule(outer: LazyRoCC) extends LazyModuleImp(outer) {
-  val io = new RoCCIO(outer)
+  val io = IO(new RoCCIO(outer))
 }
 
 /** Mixins for including RoCC **/

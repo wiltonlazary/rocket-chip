@@ -43,7 +43,7 @@ class AXI4ToTL()(implicit p: Parameters) extends LazyModule
 {
   val node = AXI4ToTLNode()
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       val numIds = edgeIn.master.endId
       val beatBytes = edgeOut.manager.beatBytes

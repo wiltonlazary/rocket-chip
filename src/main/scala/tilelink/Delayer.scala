@@ -13,7 +13,7 @@ class TLDelayer(q: Double)(implicit p: Parameters) extends LazyModule
   val node = TLAdapterNode()
   require (0.0 <= q && q < 1)
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     def feed[T <: Data](sink: DecoupledIO[T], source: DecoupledIO[T], noise: T) {
       val allow = UInt((q * 65535.0).toInt) <= LFSR16(source.valid)
       sink.valid := source.valid && allow

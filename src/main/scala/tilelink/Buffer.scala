@@ -34,7 +34,7 @@ class TLBuffer(
 
   val node = new TLBufferNode(a, b, c, d, e)
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       out.a <> a(in .a)
       in .d <> d(out.d)
@@ -91,7 +91,7 @@ class TLBufferChain(depth: Int)(implicit p: Parameters) extends LazyModule {
   buf_chain.head.node :=? nodeIn
   nodeOut :=? buf_chain.last.node
 
-  lazy val module = new LazyMultiIOModuleImp(this) { }
+  lazy val module = new LazyModuleImp(this) { }
 }
 
 object TLBufferChain

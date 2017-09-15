@@ -19,7 +19,7 @@ class TLMap(fn: AddressSet => BigInt)(implicit p: Parameters) extends LazyModule
         m.copy(address = m.address.map(a =>
           AddressSet(fn(a), a.mask)))))})
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       out <> in
       val convert = edgeIn.manager.managers.flatMap(_.address) zip edgeOut.manager.managers.flatMap(_.address)

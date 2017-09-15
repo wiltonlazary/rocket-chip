@@ -99,7 +99,7 @@ class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
     with HasL1ICacheParameters {
   override val cacheParams = outer.icacheParams // Use the local parameters
 
-  val io = new ICacheBundle(outer)
+  val io = IO(new ICacheBundle(outer))
   val (tl_out, edge_out) = outer.masterNode.out(0)
   val tl_in   = outer.slaveNode.map(_.in(0)._1)
   val edge_in = outer.slaveNode.map(_.in(0)._2)

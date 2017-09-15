@@ -28,9 +28,9 @@ abstract class TLBusBypassBase(beatBytes: Int)(implicit p: Parameters) extends L
 class TLBusBypass(beatBytes: Int)(implicit p: Parameters) extends TLBusBypassBase(beatBytes)
 {
   lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
+    val io = IO(new Bundle {
       val bypass = Bool(INPUT)
-    }
+    })
     bar.module.io.bypass := io.bypass
   }
 }
@@ -45,9 +45,9 @@ class TLBusBypassBar(implicit p: Parameters) extends LazyModule
     managerFn = { seq => seq(1) })
 
   lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
+    val io = IO(new Bundle {
       val bypass = Bool(INPUT)
-    }
+    })
 
     val (in, edge) = node.in(0)
     val Seq((out0,_), (out1,_)) = node.out

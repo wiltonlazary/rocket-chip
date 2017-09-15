@@ -26,7 +26,7 @@ class TLRAMModel(log: String = "")(implicit p: Parameters) extends LazyModule
 {
   val node = TLAdapterNode()
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       val edge         = edgeIn
       val endAddress   = edge.manager.maxAddress + 1

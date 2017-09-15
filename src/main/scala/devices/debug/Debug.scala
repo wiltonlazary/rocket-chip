@@ -290,10 +290,10 @@ class TLDebugModuleOuter(device: Device)(implicit p: Parameters) extends LazyMod
 
     val nComponents = intnode.out.size
 
-    val io = new Bundle {
+    val io = IO(new Bundle {
       val ctrl = (new DebugCtrlBundle(nComponents))
       val innerCtrl = new DecoupledIO(new DebugInternalBundle())
-    }
+    })
 
     //----DMCONTROL (The whole point of 'Outer' is to maintain this register on dmiClock (e.g. TCK) domain, so that it
     //               can be written even if 'Inner' is not being clocked or is in reset. This allows halting
@@ -405,11 +405,11 @@ class TLDebugModuleOuterAsync(device: Device)(implicit p: Parameters) extends La
 
     val nComponents = intnode.out.size
 
-    val io = new Bundle {
+    val io = IO(new Bundle {
       val dmi   = new DMIIO()(p).flip()
       val ctrl = new DebugCtrlBundle(nComponents)
       val innerCtrl = new AsyncBundle(depth=1, new DebugInternalBundle())
-    }
+    })
 
     dmi2tl.module.io.dmi <> io.dmi
 
@@ -443,11 +443,11 @@ class TLDebugModuleInner(device: Device, getNComponents: () => Int)(implicit p: 
 
     val nComponents = getNComponents()
 
-    val io = new Bundle {
+    val io = IO(new Bundle {
       val dmactive = Bool(INPUT)
       val innerCtrl = (new DecoupledIO(new DebugInternalBundle())).flip
       val debugUnavail = Vec(nComponents, Bool()).asInput
-    }
+    })
 
     //--------------------------------------------------------------
     // Import constants for shorter variable names
@@ -1014,14 +1014,14 @@ class TLDebugModuleInnerAsync(device: Device, getNComponents: () => Int)(implici
 
   lazy val module = new LazyModuleImp(this) {
 
-    val io = new Bundle {
+    val io = IO(new Bundle {
       // this comes from tlClk domain.
       // These are all asynchronous and come from Outer
       val dmactive = Bool(INPUT)
       val innerCtrl = new AsyncBundle(1, new DebugInternalBundle()).flip
       // This comes from tlClk domain.
       val debugUnavail    = Vec(getNComponents(), Bool()).asInput
-    }
+    })
 
     dmInner.module.io.innerCtrl := FromAsyncBundle(io.innerCtrl)
     dmInner.module.io.dmactive := ~ResetCatchAndSync(clock, ~io.dmactive)
@@ -1054,10 +1054,10 @@ class TLDebugModule(implicit p: Parameters) extends LazyModule {
   lazy val module = new LazyModuleImp(this) {
     val nComponents = intnode.out.size
 
-    val io = new Bundle {
+    val io = IO(new Bundle {
       val ctrl = new DebugCtrlBundle(nComponents)
       val dmi = new ClockedDMIIO().flip
-    }
+    })
 
     dmOuter.module.io.dmi <> io.dmi.dmi
     dmOuter.module.reset := io.dmi.dmiReset
@@ -1092,9 +1092,9 @@ class DMIToTL(implicit p: Parameters) extends LazyModule {
   val node = TLClientNode(Seq(TLClientPortParameters(Seq(TLClientParameters("debug")))))
 
   lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
+    val io = IO(new Bundle {
       val dmi = new DMIIO()(p).flip()
-    }
+    })
 
     val (tl, edge) = node.out(0)
 

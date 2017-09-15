@@ -61,7 +61,7 @@ class TLSplitter(policy: TLArbiter.Policy = TLArbiter.roundRobin)(implicit p: Pa
       }
     })
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     def group[T](x: Seq[T]) =
       if (x.isEmpty) Nil else x.grouped(node.in.size).toList.transpose
 

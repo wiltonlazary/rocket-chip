@@ -62,7 +62,7 @@ class TLXbar(policy: TLArbiter.Policy = TLArbiter.roundRobin)(implicit p: Parame
       )
     })
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     if ((node.in.size * node.out.size) > (8*32)) {
       println (s"!!! WARNING !!!")
       println (s" Your TLXbar ($name) is very large, with ${node.in.size} Masters and ${node.out.size} Slaves.")
@@ -263,7 +263,7 @@ class TLRAMXbar(nManagers: Int, txns: Int)(implicit p: Parameters) extends LazyM
     ram.node := TLFragmenter(4, 256)(TLDelayer(0.1)(xbar.node))
   }
 
-  lazy val module = new LazyModuleImp(this) with HasUnitTestIO {
+  lazy val module = new LazyModuleImp(this) with UnitTestModule {
     io.finished := fuzz.module.io.finished
   }
 }
@@ -286,7 +286,7 @@ class TLMulticlientXbar(nManagers: Int, nClients: Int, txns: Int)(implicit p: Pa
     ram.node := TLFragmenter(4, 256)(TLDelayer(0.1)(xbar.node))
   }
 
-  lazy val module = new LazyModuleImp(this) with HasUnitTestIO {
+  lazy val module = new LazyModuleImp(this) with UnitTestModule {
     io.finished := fuzzers.last.module.io.finished
   }
 }

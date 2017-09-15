@@ -52,7 +52,7 @@ class TLToAXI4(beatBytes: Int, combinational: Boolean = true, adapterName: Optio
 {
   val node = TLToAXI4Node(beatBytes, stripBits)
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       val slaves  = edgeOut.slave.slaves
 

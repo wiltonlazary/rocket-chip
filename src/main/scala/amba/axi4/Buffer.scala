@@ -25,7 +25,7 @@ class AXI4Buffer(
     masterFn = { p => p },
     slaveFn  = { p => p.copy(minLatency = p.minLatency + min(aw.latency,ar.latency) + min(r.latency,b.latency)) })
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     def buffer[T <: Data](config: BufferParams, data: IrrevocableIO[T]): IrrevocableIO[T] = {
       if (config.isDefined) {
         Queue.irrevocable(data, config.depth, pipe=config.pipe, flow=config.flow)

@@ -39,7 +39,7 @@ class TLError(params: ErrorParams, beatBytes: Int = 4)(implicit p: Parameters) e
     endSinkId  = 1, // can receive GrantAck
     minLatency = 1))) // no bypass needed for this device
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     import TLMessages._
     import TLPermissions._
 

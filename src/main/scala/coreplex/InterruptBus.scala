@@ -77,7 +77,7 @@ trait HasExtInterruptsBundle {
 /** This trait performs the translation from a UInt IO into Diplomatic Interrupts.
   * The wiring must be done in the concrete LazyModuleImp. 
   */
-trait HasExtInterruptsModuleImp extends LazyMultiIOModuleImp with HasExtInterruptsBundle {
+trait HasExtInterruptsModuleImp extends LazyModuleImp with HasExtInterruptsBundle {
   val outer: HasExtInterrupts
   val interrupts = IO(UInt(INPUT, width = outer.nExtInterrupts))
 

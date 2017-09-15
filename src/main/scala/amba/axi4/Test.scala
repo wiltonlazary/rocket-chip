@@ -30,7 +30,7 @@ class AXI4LiteFuzzRAM(txns: Int)(implicit p: Parameters) extends LazyModule
   ram.node   := AXI4UserYanker()(AXI4IdIndexer(0)(TLToAXI4(4, true )(TLFragmenter(4, 16)(xbar.node))))
   gpio.node  := AXI4UserYanker()(AXI4IdIndexer(0)(TLToAXI4(4, false)(TLFragmenter(4, 16)(xbar.node))))
 
-  lazy val module = new LazyModuleImp(this) with HasUnitTestIO {
+  lazy val module = new LazyModuleImp(this) with UnitTestModule {
     io.finished := fuzz.module.io.finished
   }
 }
@@ -53,7 +53,7 @@ class AXI4FullFuzzRAM(txns: Int)(implicit p: Parameters) extends LazyModule
   ram.node   := AXI4Fragmenter()(AXI4Deinterleaver(16)(TLToAXI4(4,false)(xbar.node)))
   gpio.node  := AXI4Fragmenter()(AXI4Deinterleaver(16)(TLToAXI4(4,true )(xbar.node)))
 
-  lazy val module = new LazyModuleImp(this) with HasUnitTestIO {
+  lazy val module = new LazyModuleImp(this) with UnitTestModule {
     io.finished := fuzz.module.io.finished
   }
 }
@@ -84,9 +84,9 @@ class AXI4FuzzMaster(txns: Int)(implicit p: Parameters) extends LazyModule with 
     model.node))))))
 
   lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
+    val io = IO(new Bundle {
       val finished = Bool(OUTPUT)
-    }
+    })
 
     io.finished := fuzz.module.io.finished
   }
@@ -113,7 +113,7 @@ class AXI4FuzzSlave()(implicit p: Parameters) extends LazyModule with HasFuzzTar
     AXI4IdIndexer(2)(
     node))))))))
 
-  lazy val module = new LazyMultiIOModuleImp(this) { }
+  lazy val module = new LazyModuleImp(this) { }
 }
 
 class AXI4FuzzBridge(txns: Int)(implicit p: Parameters) extends LazyModule
@@ -123,7 +123,7 @@ class AXI4FuzzBridge(txns: Int)(implicit p: Parameters) extends LazyModule
 
   slave.node := master.node
 
-  lazy val module = new LazyModuleImp(this) with HasUnitTestIO {
+  lazy val module = new LazyModuleImp(this) with UnitTestModule {
     io.finished := master.module.io.finished
   }
 }

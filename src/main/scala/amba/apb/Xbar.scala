@@ -15,7 +15,7 @@ class APBFanout()(implicit p: Parameters) extends LazyModule {
     masterFn = { case Seq(m) => m },
     slaveFn  = { seq => seq(0).copy(slaves = seq.flatMap(_.slaves)) })
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     val (in, _) = node.in(0)
 
     // Require consistent bus widths

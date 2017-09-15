@@ -14,10 +14,10 @@ class TLIsolation(fOut: (Bool, UInt) => UInt, fIn: (Bool, UInt) => UInt)(implici
   val node = TLAsyncAdapterNode()
 
   lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
+    val io = IO(new Bundle {
       val iso_out = Bool(INPUT) // Isolate from client to manager
       val iso_in  = Bool(INPUT) // Isolate from manager to client
-    }
+    })
 
     def ISOo[T <: Data](x: T): T = x.fromBits(fOut(io.iso_out, x.asUInt))
     def ISOi[T <: Data](x: T): T = x.fromBits(fIn (io.iso_in,  x.asUInt))

@@ -23,7 +23,7 @@ class TLZero(address: AddressSet, resources: Seq[Resource], executable: Boolean 
     beatBytes  = beatBytes,
     minLatency = 1))) // no bypass needed for this device
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     val (in, edge) = node.in(0)
 
     val a = Queue(in.a, 2)

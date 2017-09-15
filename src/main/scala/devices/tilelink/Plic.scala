@@ -108,7 +108,7 @@ class TLPLIC(params: PLICParams)(implicit p: Parameters) extends LazyModule
     } }
   }
 
-  lazy val module = new LazyMultiIOModuleImp(this) {
+  lazy val module = new LazyModuleImp(this) {
     val (io_devices, edgesIn) = intnode.in.unzip
     val (io_harts, _) = intnode.out.unzip
 
