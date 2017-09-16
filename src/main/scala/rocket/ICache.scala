@@ -48,12 +48,13 @@ class ICache(val icacheParams: ICacheParams, val hartid: Int)(implicit p: Parame
     name = s"Core ${hartid} ICache"))
 
   val size = icacheParams.nSets * icacheParams.nWays * icacheParams.blockBytes
+  val itimAddrSpaceSize = size - icacheParams.nSets / 2 * icacheParams.blockBytes
   val device = new SimpleDevice("itim", Seq("sifive,itim0"))
   val slaveNode = icacheParams.itimAddr.map { itimAddr =>
     val wordBytes = icacheParams.fetchBytes
     TLManagerNode(Seq(TLManagerPortParameters(
       Seq(TLManagerParameters(
-        address         = Seq(AddressSet(itimAddr, size-1)),
+        address         = AddressSet.misaligned(itimAddr, itimAddrSpaceSize),
         resources       = device.reg("mem"),
         regionType      = RegionType.UNCACHED,
         executable      = true,
