@@ -168,6 +168,7 @@ abstract class RocketTileWrapper(rtp: RocketTileParams, hartid: Int)(implicit p:
   val rocket = LazyModule(new RocketTile(rtp, hartid))
   val masterNode: OutputNode[_,_,_,_,_]
   val slaveNode: InputNode[_,_,_,_,_]
+  val intOutputNode = IntOutputNode()
   val asyncIntNode   = IntInputNode()
   val periphIntNode  = IntInputNode()
   val coreIntNode    = IntInputNode()
@@ -199,6 +200,7 @@ abstract class RocketTileWrapper(rtp: RocketTileParams, hartid: Int)(implicit p:
     val io = new CoreBundle with HasExternallyDrivenTileConstants {
       val master = masterNode.bundleOut
       val slave = slaveNode.bundleIn
+      val outputInterrupts = intOutputNode.bundleOut
       val asyncInterrupts  = asyncIntNode.bundleIn
       val periphInterrupts = periphIntNode.bundleIn
       val coreInterrupts   = coreIntNode.bundleIn
@@ -224,6 +226,8 @@ class SyncRocketTile(rtp: RocketTileParams, hartid: Int)(implicit p: Parameters)
   intXbar.intnode  := xing.intnode
   intXbar.intnode  := periphIntNode
   intXbar.intnode  := coreIntNode
+
+  intOutputNode := rocket.intOutputNode
 }
 
 class AsyncRocketTile(rtp: RocketTileParams, hartid: Int)(implicit p: Parameters) extends RocketTileWrapper(rtp, hartid) {
@@ -251,6 +255,10 @@ class AsyncRocketTile(rtp: RocketTileParams, hartid: Int)(implicit p: Parameters
   intXbar.intnode  := asyncXing.intnode
   intXbar.intnode  := periphXing.intnode
   intXbar.intnode  := coreIntNode
+
+  val outXing = LazyModule(new IntXing(3))
+  intOutputNode := outXing.intnode
+  outXing.intnode := rocket.intOutputNode
 }
 
 class RationalRocketTile(rtp: RocketTileParams, hartid: Int)(implicit p: Parameters) extends RocketTileWrapper(rtp, hartid) {
@@ -279,4 +287,8 @@ class RationalRocketTile(rtp: RocketTileParams, hartid: Int)(implicit p: Paramet
   intXbar.intnode  := asyncXing.intnode
   intXbar.intnode  := periphXing.intnode
   intXbar.intnode  := coreIntNode
+
+  val outXing = LazyModule(new IntXing(1))
+  intOutputNode := outXing.intnode
+  outXing.intnode := rocket.intOutputNode
 }

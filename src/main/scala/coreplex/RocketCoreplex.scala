@@ -84,6 +84,10 @@ trait HasRocketTiles extends HasSystemBus
     lip.foreach { coreIntXbar.intnode := _ }                // lip
     wrapper.coreIntNode   := coreIntXbar.intnode
 
+    val coreIntOutputXbar = LazyModule(new IntXbar)
+    coreIntOutputXbar.intnode := wrapper.intOutputNode
+    plic.intnode := coreIntOutputXbar.intnode
+
     wrapper
   }
 }
