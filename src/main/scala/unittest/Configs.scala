@@ -7,9 +7,10 @@ import freechips.rocketchip.amba.ahb._
 import freechips.rocketchip.amba.apb._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.config._
-import freechips.rocketchip.coreplex.{BaseCoreplexConfig}
+import freechips.rocketchip.subsystem.{BaseSubsystemConfig}
 import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.util._
 
 case object TestDurationMultiplier extends Field[Int]
 
@@ -30,7 +31,9 @@ class WithAMBAUnitTests extends Config((site, here, up) => {
       Module(new APBBridgeTest(false,txns=6*txns, timeout=timeout)),
       Module(new AXI4LiteFuzzRAMTest(txns=6*txns, timeout=timeout)),
       Module(new AXI4FullFuzzRAMTest(txns=3*txns, timeout=timeout)),
-      Module(new AXI4BridgeTest(     txns=3*txns, timeout=timeout))) }
+      Module(new AXI4BridgeTest(     txns=3*txns, timeout=timeout)),
+      Module(new AXI4XbarTest(       txns=1*txns, timeout=timeout)),
+      Module(new AXI4RAMAsyncCrossingTest(txns=3*txns, timeout=timeout))) }
 })
 
 class WithTLSimpleUnitTests extends Config((site, here, up) => {
@@ -43,12 +46,16 @@ class WithTLSimpleUnitTests extends Config((site, here, up) => {
       Module(new TLRAMSimpleTest(4,        txns=15*txns, timeout=timeout)),
       Module(new TLRAMSimpleTest(16,       txns=15*txns, timeout=timeout)),
       Module(new TLRAMZeroDelayTest(4,     txns=15*txns, timeout=timeout)),
+      Module(new TLRAMHintHandlerTest(     txns=15*txns, timeout=timeout)),
       Module(new TLFuzzRAMTest(            txns= 3*txns, timeout=timeout)),
       Module(new TLRR0Test(                txns= 3*txns, timeout=timeout)),
       Module(new TLRR1Test(                txns= 3*txns, timeout=timeout)),
       Module(new TLRAMRationalCrossingTest(txns= 3*txns, timeout=timeout)),
       Module(new TLRAMAsyncCrossingTest(   txns= 5*txns, timeout=timeout)),
-      Module(new TLRAMAtomicAutomataTest(  txns=10*txns, timeout=timeout)) ) }
+      Module(new TLRAMAtomicAutomataTest(  txns=10*txns, timeout=timeout)),
+      Module(new TLRAMECCTest(8, 4,        txns=15*txns, timeout=timeout)),
+      Module(new TLRAMECCTest(4, 1,        txns=15*txns, timeout=timeout)),
+      Module(new TLRAMECCTest(1, 1,        txns=15*txns, timeout=timeout)) ) }
 })
 
 class WithTLWidthUnitTests extends Config((site, here, up) => {
@@ -74,10 +81,30 @@ class WithTLXbarUnitTests extends Config((site, here, up) => {
       Module(new TLRAMXbarTest(1,           txns=5*txns, timeout=timeout)),
       Module(new TLRAMXbarTest(2,           txns=5*txns, timeout=timeout)),
       Module(new TLRAMXbarTest(8,           txns=5*txns, timeout=timeout)),
-      Module(new TLMulticlientXbarTest(4,4, txns=2*txns, timeout=timeout)) ) }
+      Module(new TLMulticlientXbarTest(4,4, txns=2*txns, timeout=timeout)),
+      Module(new TLMasterMuxTest(           txns=5*txns, timeout=timeout)) ) }
 })
 
-class AMBAUnitTestConfig extends Config(new WithAMBAUnitTests ++ new WithTestDuration(10) ++ new BaseCoreplexConfig)
-class TLSimpleUnitTestConfig extends Config(new WithTLSimpleUnitTests ++ new WithTestDuration(10) ++ new BaseCoreplexConfig)
-class TLWidthUnitTestConfig extends Config(new WithTLWidthUnitTests ++ new WithTestDuration(10) ++ new BaseCoreplexConfig)
-class TLXbarUnitTestConfig extends Config(new WithTLXbarUnitTests ++ new WithTestDuration(10) ++ new BaseCoreplexConfig)
+class WithECCTests extends Config((site, here, up) => {
+  case UnitTests => (q: Parameters) => {
+    Seq(
+      // try some perfect codes
+      Module(new ECCTest(1)),  // n=3
+      Module(new ECCTest(4)),  // n=7
+      Module(new ECCTest(11)), // n=15
+      // try +1 perfect
+      Module(new ECCTest(2)),  // n=5
+      Module(new ECCTest(5)),  // n=9
+      Module(new ECCTest(12)), // n=17
+      // try -1 perfect
+      Module(new ECCTest(3)),  // n=6
+      Module(new ECCTest(10)), // n=14
+      // try a useful size
+      Module(new ECCTest(8)) ) }
+})
+
+class AMBAUnitTestConfig extends Config(new WithAMBAUnitTests ++ new WithTestDuration(10) ++ new BaseSubsystemConfig)
+class TLSimpleUnitTestConfig extends Config(new WithTLSimpleUnitTests ++ new WithTestDuration(10) ++ new BaseSubsystemConfig)
+class TLWidthUnitTestConfig extends Config(new WithTLWidthUnitTests ++ new WithTestDuration(10) ++ new BaseSubsystemConfig)
+class TLXbarUnitTestConfig extends Config(new WithTLXbarUnitTests ++ new WithTestDuration(10) ++ new BaseSubsystemConfig)
+class ECCUnitTestConfig extends Config(new WithECCTests)

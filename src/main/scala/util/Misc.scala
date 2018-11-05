@@ -7,23 +7,15 @@ import Chisel._
 import freechips.rocketchip.config.Parameters
 import scala.math._
 
-class ParameterizedBundle(implicit p: Parameters) extends Bundle {
-  override def cloneType = {
-    try {
-      this.getClass.getConstructors.head.newInstance(p).asInstanceOf[this.type]
-    } catch {
-      case e: java.lang.IllegalArgumentException =>
-        throwException("Unable to use ParamaterizedBundle.cloneType on " +
-                       this.getClass + ", probably because " + this.getClass +
-                       "() takes more than one argument.  Consider overriding " +
-                       "cloneType() on " + this.getClass, e)
-    }
-  }
-}
+class ParameterizedBundle(implicit p: Parameters) extends Bundle
 
 trait Clocked extends Bundle {
   val clock = Clock()
   val reset = Bool()  
+}
+
+trait CanHaltAndCatchFire extends Bundle {
+  val halt_and_catch_fire: Option[Bool]
 }
 
 object DecoupledHelper {
@@ -32,7 +24,11 @@ object DecoupledHelper {
 
 class DecoupledHelper(val rvs: Seq[Bool]) {
   def fire(exclude: Bool, includes: Bool*) = {
+    require(rvs.contains(exclude), "Excluded Bool not present in DecoupledHelper! Note that DecoupledHelper uses referential equality for exclusion! If you don't want to exclude anything, use fire()!")
     (rvs.filter(_ ne exclude) ++ includes).reduce(_ && _)
+  }
+  def fire() = {
+    rvs.reduce(_ && _)
   }
 }
 
@@ -69,7 +65,7 @@ object ValidMux {
     apply(v1 +: v2.toSeq)
   }
   def apply[T <: Data](valids: Seq[ValidIO[T]]): ValidIO[T] = {
-    val out = Wire(Valid(valids.head.bits))
+    val out = Wire(Valid(valids.head.bits.cloneType))
     out.valid := valids.map(_.valid).reduce(_ || _)
     out.bits := MuxCase(valids.head.bits,
       valids.map(v => (v.valid -> v.bits)))
@@ -135,34 +131,24 @@ object Str
 
 object Split
 {
-  // is there a better way to do do this?
-  def apply(x: Bits, n0: Int) = {
-    val w = checkWidth(x, n0)
-    (x(w-1,n0), x(n0-1,0))
-  }
-  def apply(x: Bits, n1: Int, n0: Int) = {
-    val w = checkWidth(x, n1, n0)
-    (x(w-1,n1), x(n1-1,n0), x(n0-1,0))
-  }
-  def apply(x: Bits, n2: Int, n1: Int, n0: Int) = {
-    val w = checkWidth(x, n2, n1, n0)
-    (x(w-1,n2), x(n2-1,n1), x(n1-1,n0), x(n0-1,0))
-  }
-
-  private def checkWidth(x: Bits, n: Int*) = {
+  def apply(x: UInt, n0: Int) = {
     val w = x.getWidth
-    def decreasing(x: Seq[Int]): Boolean =
-      if (x.tail.isEmpty) true
-      else x.head >= x.tail.head && decreasing(x.tail)
-    require(decreasing(w :: n.toList))
-    w
+    (x.extract(w-1,n0), x.extract(n0-1,0))
+  }
+  def apply(x: UInt, n1: Int, n0: Int) = {
+    val w = x.getWidth
+    (x.extract(w-1,n1), x.extract(n1-1,n0), x.extract(n0-1,0))
+  }
+  def apply(x: UInt, n2: Int, n1: Int, n0: Int) = {
+    val w = x.getWidth
+    (x.extract(w-1,n2), x.extract(n2-1,n1), x.extract(n1-1,n0), x.extract(n0-1,0))
   }
 }
 
 object Random
 {
   def apply(mod: Int, random: UInt): UInt = {
-    if (isPow2(mod)) random(log2Up(mod)-1,0)
+    if (isPow2(mod)) random.extract(log2Ceil(mod)-1,0)
     else PriorityEncoder(partition(apply(1 << log2Up(mod*8), random), mod))
   }
   def apply(mod: Int): UInt = apply(mod, randomizer)
@@ -173,10 +159,8 @@ object Random
   def oneHot(mod: Int): UInt = oneHot(mod, randomizer)
 
   private def randomizer = LFSR16()
-  private def round(x: Double): Int =
-    if (x.toInt.toDouble == x) x.toInt else (x.toInt + 1) & -2
   private def partition(value: UInt, slices: Int) =
-    Seq.tabulate(slices)(i => value < UInt(round((i << value.getWidth).toDouble / slices)))
+    Seq.tabulate(slices)(i => value < UInt(((i + 1) << value.getWidth) / slices))
 }
 
 object Majority {
@@ -217,7 +201,7 @@ object MaskGen {
     require (groupBy >= 1 && beatBytes >= groupBy)
     require (isPow2(beatBytes) && isPow2(groupBy))
     val lgBytes = log2Ceil(beatBytes)
-    val sizeOH = UIntToOH(lgSize, log2Up(beatBytes)) | UInt(groupBy*2 - 1)
+    val sizeOH = UIntToOH(lgSize | 0.U(log2Up(beatBytes).W), log2Up(beatBytes)) | UInt(groupBy*2 - 1)
 
     def helper(i: Int): Seq[(Bool, Bool)] = {
       if (i == 0) {

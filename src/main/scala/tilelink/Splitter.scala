@@ -6,6 +6,32 @@ import Chisel._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 
+case class SplitterArg[T](newSize: Int, ports: Seq[T])
+case class TLSplitterNode(
+  clientFn:        SplitterArg[TLClientPortParameters]  => Seq[TLClientPortParameters],
+  managerFn:       SplitterArg[TLManagerPortParameters] => Seq[TLManagerPortParameters])(
+  implicit valName: ValName)
+  extends TLCustomNode
+{
+  def resolveStar(iKnown: Int, oKnown: Int, iStars: Int, oStars: Int): (Int, Int) = {
+    require (oKnown == 0, s"${name} (a splitter) appears right of a := or :*=; use a :=* instead${lazyModule.line}")
+    require (iStars == 0, s"${name} (a splitter) cannot appear left of a :*=; did you mean :=*?${lazyModule.line}")
+    (0, iKnown)
+  }
+  def mapParamsD(n: Int, p: Seq[TLClientPortParameters]): Seq[TLClientPortParameters] = {
+    require (p.size == 0 || n % p.size == 0, s"Diplomacy bug; splitter inputs do not divide outputs")
+    val out = clientFn(SplitterArg(n, p))
+    require (out.size == n, s"${name} created the wrong number of outputs from inputs${lazyModule.line}")
+    out
+  }
+  def mapParamsU(n: Int, p: Seq[TLManagerPortParameters]): Seq[TLManagerPortParameters] = {
+    require (n == 0 || p.size % n == 0, s"Diplomacy bug; splitter outputs indivisable by inputs")
+    val out = managerFn(SplitterArg(n, p))
+    require (out.size == n, s"${name} created the wrong number of inputs from outputs${lazyModule.line}")
+    out
+  }
+}
+
 class TLSplitter(policy: TLArbiter.Policy = TLArbiter.roundRobin)(implicit p: Parameters) extends LazyModule
 {
   val node = TLSplitterNode(
@@ -17,11 +43,10 @@ class TLSplitter(policy: TLArbiter.Policy = TLArbiter.roundRobin)(implicit p: Pa
       if (newSize == 0) Nil else
       ports.grouped(newSize).toList.transpose.map { seq =>
         val fifoIdFactory = TLXbar.relabeler()
-        val outputIdRanges = TLXbar.mapOutputIds(seq)
         seq(0).copy(
           minLatency = seq.map(_.minLatency).min,
-          endSinkId = outputIdRanges.map(_.map(_.end).getOrElse(0)).max,
-          managers = seq.zipWithIndex.flatMap { case (port, i) =>
+          endSinkId = TLXbar.mapOutputIds(seq).map(_.end).max,
+          managers = seq.flatMap { port =>
             require (port.beatBytes == seq(0).beatBytes,
               s"Splitter data widths don't match: ${port.managers.map(_.name)} has ${port.beatBytes}B vs ${seq(0).managers.map(_.name)} has ${seq(0).beatBytes}B")
             val fifoIdMapper = fifoIdFactory()
@@ -34,18 +59,14 @@ class TLSplitter(policy: TLArbiter.Policy = TLArbiter.roundRobin)(implicit p: Pa
     })
 
   lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
-      val in  = node.bundleIn
-      val out = node.bundleOut
-    }
-
     def group[T](x: Seq[T]) =
-      if (x.isEmpty) Nil else x.grouped(node.edgesIn.size).toList.transpose
+      if (x.isEmpty) Nil else x.grouped(node.in.size).toList.transpose
 
-    if (node.edgesOut.size == node.edgesIn.size) {
-      io.out <> io.in
-    } else ((node.edgesIn zip io.in) zip (group(node.edgesOut) zip group(io.out))) foreach {
-      case ((edgeIn, io_in), (edgesOut, io_out)) =>
+    if (node.out.size == node.in.size) {
+      (node.in zip node.out) foreach { case ((i, _), (o, _)) => o <> i }
+    } else (node.in zip group(node.out)) foreach {
+      case ((io_in, edgeIn), seq) =>
+      val (io_out, edgesOut) = seq.unzip
 
       // Grab the port ID mapping
       val outputIdRanges = TLXbar.mapOutputIds(edgesOut.map(_.manager))
@@ -87,13 +108,13 @@ class TLSplitter(policy: TLArbiter.Policy = TLArbiter.roundRobin)(implicit p: Pa
 
         io_out(i).a <> out(i).a
         out(i).d <> io_out(i).d
-        out(i).d.bits.sink := io_out(i).d.bits.sink | UInt(r.map(_.start).getOrElse(0))
+        out(i).d.bits.sink := io_out(i).d.bits.sink | UInt(r.start)
 
         if (edgesOut(i).manager.anySupportAcquireB && edgeIn.client.anySupportProbe) {
           io_out(i).c <> out(i).c
           io_out(i).e <> out(i).e
           out(i).b <> io_out(i).b
-          io_out(i).e.bits.sink := trim(out(i).e.bits.sink, r.map(_.size).getOrElse(0))
+          io_out(i).e.bits.sink := trim(out(i).e.bits.sink, r.size)
         } else {
           out(i).c.ready := Bool(false)
           out(i).e.ready := Bool(false)
@@ -106,7 +127,7 @@ class TLSplitter(policy: TLArbiter.Policy = TLArbiter.roundRobin)(implicit p: Pa
 
       val requestA = Vec(outputPorts.map { o => o(in.a.bits.address) })
       val requestC = Vec(outputPorts.map { o => o(in.c.bits.address) })
-      val requestE = Vec(outputIdRanges.map { o => o.map(_.contains(in.e.bits.sink)).getOrElse(Bool(false)) })
+      val requestE = Vec(outputIdRanges.map { o => o.contains(in.e.bits.sink) })
       (out.map(_.a) zip TLXbar.fanout(in.a, requestA)) foreach { case (o, i) => o <> i }
       (out.map(_.c) zip TLXbar.fanout(in.c, requestC)) foreach { case (o, i) => o <> i }
       (out.map(_.e) zip TLXbar.fanout(in.e, requestE)) foreach { case (o, i) => o <> i }

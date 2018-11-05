@@ -3,33 +3,37 @@
 package freechips.rocketchip.tilelink
 
 import Chisel._
-import chisel3.internal.sourceinfo.SourceInfo
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.subsystem.CrossingWrapper
 import freechips.rocketchip.util._
+import freechips.rocketchip.util.property._
 
-class TLAsyncCrossingSource(sync: Int = 3)(implicit p: Parameters) extends LazyModule
+class TLAsyncCrossingSource(sync: Option[Int])(implicit p: Parameters) extends LazyModule
 {
+  def this(x: Int)(implicit p: Parameters) = this(Some(x))
+  def this()(implicit p: Parameters) = this(None)
+
   val node = TLAsyncSourceNode(sync)
 
   lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
-      val in  = node.bundleIn
-      val out = node.bundleOut
-    }
-
-    ((io.in zip io.out) zip (node.edgesIn zip node.edgesOut)) foreach { case ((in, out), (edgeIn, edgeOut)) =>
-      val sink_reset_n = out.a.sink_reset_n
+    (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       val bce = edgeIn.manager.anySupportAcquireB && edgeIn.client.anySupportProbe
-      val depth = edgeOut.manager.depth
+      val psync = sync.getOrElse(edgeOut.manager.async.sync)
+      val params = edgeOut.manager.async.copy(sync = psync)
 
-      out.a <> ToAsyncBundle(in.a, depth, sync)
-      in.d <> FromAsyncBundle(out.d, sync)
+      out.a <> ToAsyncBundle(in.a, params)
+      in.d <> FromAsyncBundle(out.d, psync)
+      cover(in.a, "TL_ASYNC_CROSSING_SOURCE_A", "MemorySystem;;TLAsyncCrossingSource Channel A")
+      cover(in.d, "TL_ASYNC_CROSSING_SOURCE_D", "MemorySystem;;TLAsyncCrossingSource Channel D")
 
       if (bce) {
-        in.b <> FromAsyncBundle(out.b, sync)
-        out.c <> ToAsyncBundle(in.c, depth, sync)
-        out.e <> ToAsyncBundle(in.e, depth, sync)
+        in.b <> FromAsyncBundle(out.b, psync)
+        out.c <> ToAsyncBundle(in.c, params)
+        out.e <> ToAsyncBundle(in.e, params)
+        cover(in.b, "TL_ASYNC_CROSSING_SOURCE_B", "MemorySystem;;TLAsyncCrossingSource Channel B")
+        cover(in.c, "TL_ASYNC_CROSSING_SOURCE_C", "MemorySystem;;TLAsyncCrossingSource Channel C")
+        cover(in.e, "TL_ASYNC_CROSSING_SOURCE_E", "MemorySystem;;TLAsyncCrossingSource Channel E")
       } else {
         in.b.valid := Bool(false)
         in.c.ready := Bool(true)
@@ -42,27 +46,26 @@ class TLAsyncCrossingSource(sync: Int = 3)(implicit p: Parameters) extends LazyM
   }
 }
 
-class TLAsyncCrossingSink(depth: Int = 8, sync: Int = 3)(implicit p: Parameters) extends LazyModule
+class TLAsyncCrossingSink(params: AsyncQueueParams = AsyncQueueParams())(implicit p: Parameters) extends LazyModule
 {
-  val node = TLAsyncSinkNode(depth, sync)
+  val node = TLAsyncSinkNode(params)
 
   lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
-      val in  = node.bundleIn
-      val out = node.bundleOut
-    }
-
-    ((io.in zip io.out) zip (node.edgesIn zip node.edgesOut)) foreach { case ((in, out), (edgeIn, edgeOut)) =>
-      val source_reset_n = in.a.source_reset_n
+    (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       val bce = edgeOut.manager.anySupportAcquireB && edgeOut.client.anySupportProbe
 
-      out.a <> FromAsyncBundle(in.a, sync)
-      in.d <> ToAsyncBundle(out.d, depth, sync)
+      out.a <> FromAsyncBundle(in.a, params.sync)
+      in.d <> ToAsyncBundle(out.d, params)
+      cover(out.a, "TL_ASYNC_CROSSING_SINK_A", "MemorySystem;;TLAsyncCrossingSink Channel A")
+      cover(out.d, "TL_ASYNC_CROSSING_SINK_D", "MemorySystem;;TLAsyncCrossingSink Channel D")
 
       if (bce) {
-        in.b <> ToAsyncBundle(out.b, depth, sync)
-        out.c <> FromAsyncBundle(in.c, sync)
-        out.e <> FromAsyncBundle(in.e, sync)
+        in.b <> ToAsyncBundle(out.b, params)
+        out.c <> FromAsyncBundle(in.c, params.sync)
+        out.e <> FromAsyncBundle(in.e, params.sync)
+        cover(out.b, "TL_ASYNC_CROSSING_SINK_B", "MemorySystem;;TLAsyncCrossingSinkChannel B")
+        cover(out.c, "TL_ASYNC_CROSSING_SINK_C", "MemorySystem;;TLAsyncCrossingSink Channel C")
+        cover(out.e, "TL_ASYNC_CROSSING_SINK_E", "MemorySystem;;TLAsyncCrossingSink Channel E")
       } else {
         in.b.widx := UInt(0)
         in.c.ridx := UInt(0)
@@ -77,97 +80,70 @@ class TLAsyncCrossingSink(depth: Int = 8, sync: Int = 3)(implicit p: Parameters)
 
 object TLAsyncCrossingSource
 {
-  // applied to the TL source node; y.node := TLAsyncCrossingSource()(x.node)
-  def apply(sync: Int = 3)(x: TLOutwardNode)(implicit p: Parameters, sourceInfo: SourceInfo): TLAsyncOutwardNode = {
-    val source = LazyModule(new TLAsyncCrossingSource(sync))
-    source.node :=? x
-    source.node
+  def apply()(implicit p: Parameters): TLAsyncSourceNode = apply(None)
+  def apply(sync: Int)(implicit p: Parameters): TLAsyncSourceNode = apply(Some(sync))
+  def apply(sync: Option[Int])(implicit p: Parameters): TLAsyncSourceNode =
+  {
+    val asource = LazyModule(new TLAsyncCrossingSource(sync))
+    asource.node
   }
 }
 
 object TLAsyncCrossingSink
 {
-  // applied to the TL source node; y.node := TLAsyncCrossingSink()(x.node)
-  def apply(depth: Int = 8, sync: Int = 3)(x: TLAsyncOutwardNode)(implicit p: Parameters, sourceInfo: SourceInfo): TLOutwardNode = {
-    val sink = LazyModule(new TLAsyncCrossingSink(depth, sync))
-    sink.node :=? x
-    sink.node
+  def apply(params: AsyncQueueParams = AsyncQueueParams())(implicit p: Parameters) =
+  {
+    val asink = LazyModule(new TLAsyncCrossingSink(params))
+    asink.node
   }
 }
 
-class TLAsyncCrossing(depth: Int = 8, sync: Int = 3)(implicit p: Parameters) extends LazyModule
+@deprecated("TLAsyncCrossing is fragile. Use TLAsyncCrossingSource and TLAsyncCrossingSink", "rocket-chip 1.2")
+class TLAsyncCrossing(params: AsyncQueueParams = AsyncQueueParams())(implicit p: Parameters) extends LazyModule
 {
-  val nodeIn = TLInputNode()
-  val nodeOut = TLOutputNode()
-  val node = NodeHandle(nodeIn, nodeOut)
+  val source = LazyModule(new TLAsyncCrossingSource())
+  val sink = LazyModule(new TLAsyncCrossingSink(params))
+  val node = NodeHandle(source.node, sink.node)
 
-  val source = LazyModule(new TLAsyncCrossingSource(sync))
-  val sink = LazyModule(new TLAsyncCrossingSink(depth, sync))
-
-  val _    = (sink.node := source.node) // no monitor
-  val in   = (source.node := nodeIn)
-  val out  = (nodeOut := sink.node)
+  sink.node := source.node
 
   lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
-      val in        = nodeIn.bundleIn
+    val io = IO(new Bundle {
       val in_clock  = Clock(INPUT)
       val in_reset  = Bool(INPUT)
-      val out       = nodeOut.bundleOut
       val out_clock = Clock(INPUT)
       val out_reset = Bool(INPUT)
-    }
+    })
 
     source.module.clock := io.in_clock
     source.module.reset := io.in_reset
-    in.foreach { lm =>
-      lm.module.clock := io.in_clock
-      lm.module.reset := io.in_reset
-    }
-
     sink.module.clock := io.out_clock
     sink.module.reset := io.out_reset
-    out.foreach { lm =>
-      lm.module.clock := io.out_clock
-      lm.module.reset := io.out_reset
-    }
   }
 }
 
 /** Synthesizeable unit tests */
 import freechips.rocketchip.unittest._
 
-class TLRAMAsyncCrossing(txns: Int)(implicit p: Parameters) extends LazyModule {
+class TLRAMAsyncCrossing(txns: Int, params: AsynchronousCrossing = AsynchronousCrossing())(implicit p: Parameters) extends LazyModule {
   val model = LazyModule(new TLRAMModel("AsyncCrossing"))
-  val ram  = LazyModule(new TLRAM(AddressSet(0x0, 0x3ff)))
   val fuzz = LazyModule(new TLFuzzer(txns))
-  val cross = LazyModule(new TLAsyncCrossing)
+  val island = LazyModule(new CrossingWrapper(params))
+  val ram  = island { LazyModule(new TLRAM(AddressSet(0x0, 0x3ff))) }
 
-  model.node := fuzz.node
-  cross.node := TLFragmenter(4, 256)(TLDelayer(0.1)(model.node))
-  val monitor = (ram.node := cross.node)
+  island.crossTLIn(ram.node) := TLFragmenter(4, 256) := TLDelayer(0.1) := model.node := fuzz.node
 
-  lazy val module = new LazyModuleImp(this) with HasUnitTestIO {
+  lazy val module = new LazyModuleImp(this) with UnitTestModule {
     io.finished := fuzz.module.io.finished
 
     // Shove the RAM into another clock domain
     val clocks = Module(new Pow2ClockDivider(2))
-    ram.module.clock := clocks.io.clock_out
-
-    // ... and safely cross TL2 into it
-    cross.module.io.in_clock := clock
-    cross.module.io.in_reset := reset
-    cross.module.io.out_clock := clocks.io.clock_out
-    cross.module.io.out_reset := reset
-
-    // Push the Monitor into the right clock domain
-    monitor.foreach { m =>
-      m.module.clock := clocks.io.clock_out
-      m.module.reset := reset
-    }
+    island.module.clock := clocks.io.clock_out
   }
 }
 
 class TLRAMAsyncCrossingTest(txns: Int = 5000, timeout: Int = 500000)(implicit p: Parameters) extends UnitTest(timeout) {
-  io.finished := Module(LazyModule(new TLRAMAsyncCrossing(txns)).module).io.finished
+  val dut_wide   = Module(LazyModule(new TLRAMAsyncCrossing(txns)).module)
+  val dut_narrow = Module(LazyModule(new TLRAMAsyncCrossing(txns, AsynchronousCrossing(safe = false, narrow = true))).module)
+  io.finished := dut_wide.io.finished && dut_narrow.io.finished
 }

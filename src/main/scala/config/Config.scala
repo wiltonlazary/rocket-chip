@@ -10,8 +10,10 @@ abstract class Field[T] private (val default: Option[T])
 
 abstract class View {
   final def apply[T](pname: Field[T]): T = apply(pname, this)
-  final def apply[T](pname: Field[T], site: View): T = find(pname, site) match {
-    case Some(x) => x.asInstanceOf[T]
+  final def apply[T](pname: Field[T], site: View): T = {
+    val out = find(pname, site)
+    require (out.isDefined, s"Key ${pname} is not defined in Parameters")
+    out.get
   }
 
   final def lift[T](pname: Field[T]): Option[T] = lift(pname, this)
@@ -21,18 +23,25 @@ abstract class View {
 }
 
 abstract class Parameters extends View {
-  final def ++ (x: Parameters):                                       Parameters = new ChainParameters(this, x)
-  final def alter(f: (View, View, View) => PartialFunction[Any,Any]): Parameters = Parameters(f) ++ this
-  final def alterPartial(f: PartialFunction[Any,Any]):                Parameters = Parameters((_,_,_) => f) ++ this
+  final def ++ (x: Parameters): Parameters =
+    new ChainParameters(this, x)
+
+  final def alter(f: (View, View, View) => PartialFunction[Any,Any]): Parameters =
+    Parameters(f) ++ this
+
+  final def alterPartial(f: PartialFunction[Any,Any]): Parameters =
+    Parameters((_,_,_) => f) ++ this
+
+  final def alterMap(m: Map[Any,Any]): Parameters =
+    new MapParameters(m) ++ this
 
   protected[config] def chain[T](site: View, tail: View, pname: Field[T]): Option[T]
   protected[config] def find[T](pname: Field[T], site: View) = chain(site, new TerminalView, pname)
 }
 
 object Parameters {
-  def empty:                                                    Parameters = new EmptyParameters
+  def empty: Parameters = new EmptyParameters
   def apply(f: (View, View, View) => PartialFunction[Any,Any]): Parameters = new PartialParameters(f)
-  def root(p: Parameters) = p
 }
 
 class Config(p: Parameters) extends Parameters {
@@ -65,5 +74,12 @@ private class PartialParameters(f: (View, View, View) => PartialFunction[Any,Any
   protected[config] def chain[T](site: View, tail: View, pname: Field[T]) = {
     val g = f(site, this, tail)
     if (g.isDefinedAt(pname)) Some(g.apply(pname).asInstanceOf[T]) else tail.find(pname, site)
+  }
+}
+
+private class MapParameters(map: Map[Any, Any]) extends Parameters {
+  protected[config] def chain[T](site: View, tail: View, pname: Field[T]) = {
+    val g = map.get(pname)
+    if (g.isDefined) Some(g.get.asInstanceOf[T]) else tail.find(pname, site)
   }
 }

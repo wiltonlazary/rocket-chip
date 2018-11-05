@@ -3,31 +3,25 @@
 package freechips.rocketchip.tilelink
 
 import Chisel._
-import chisel3.internal.sourceinfo.SourceInfo
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 
 // q is the probability to delay a request
 class TLDelayer(q: Double)(implicit p: Parameters) extends LazyModule
 {
-  val node = TLIdentityNode()
+  val node = TLAdapterNode()
   require (0.0 <= q && q < 1)
 
   lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
-      val in  = node.bundleIn
-      val out = node.bundleOut
-    }
-
     def feed[T <: Data](sink: DecoupledIO[T], source: DecoupledIO[T], noise: T) {
-      val allow = UInt((q * 65535.0).toInt) <= LFSR16(source.valid)
+      val allow = UInt((q * 65535.0).toInt) <= LFSRNoiseMaker(16, source.valid)
       sink.valid := source.valid && allow
       source.ready := sink.ready && allow
       sink.bits := source.bits
       when (!sink.valid) { sink.bits := noise }
     }
 
-    (io.in zip io.out) foreach { case (in, out) =>
+    (node.in zip node.out) foreach { case ((in, _), (out, _)) =>
       val anoise = Wire(in.a.bits)
       anoise.opcode  := LFSRNoiseMaker(3)
       anoise.param   := LFSRNoiseMaker(3)
@@ -53,7 +47,7 @@ class TLDelayer(q: Double)(implicit p: Parameters) extends LazyModule
       cnoise.source  := LFSRNoiseMaker(cnoise.params.sourceBits)
       cnoise.address := LFSRNoiseMaker(cnoise.params.addressBits)
       cnoise.data    := LFSRNoiseMaker(cnoise.params.dataBits)
-      cnoise.error   := LFSRNoiseMaker(1)(0)
+      cnoise.corrupt := LFSRNoiseMaker(1)(0)
 
       val dnoise = Wire(out.d.bits)
       dnoise.opcode  := LFSRNoiseMaker(3)
@@ -61,8 +55,9 @@ class TLDelayer(q: Double)(implicit p: Parameters) extends LazyModule
       dnoise.size    := LFSRNoiseMaker(dnoise.params.sizeBits)
       dnoise.source  := LFSRNoiseMaker(dnoise.params.sourceBits)
       dnoise.sink    := LFSRNoiseMaker(dnoise.params.sinkBits)
+      dnoise.denied  := LFSRNoiseMaker(1)(0)
       dnoise.data    := LFSRNoiseMaker(dnoise.params.dataBits)
-      dnoise.error   := LFSRNoiseMaker(1)(0)
+      dnoise.corrupt := LFSRNoiseMaker(1)(0)
 
       val enoise = Wire(in.e.bits)
       enoise.sink := LFSRNoiseMaker(enoise.params.sinkBits)
@@ -78,10 +73,9 @@ class TLDelayer(q: Double)(implicit p: Parameters) extends LazyModule
 
 object TLDelayer
 {
-  // applied to the TL source node; y.node := TLDelayer(0.01)(x.node)
-  def apply(q: Double)(x: TLOutwardNode)(implicit p: Parameters, sourceInfo: SourceInfo): TLOutwardNode = {
+  def apply(q: Double)(implicit p: Parameters): TLNode =
+  {
     val delayer = LazyModule(new TLDelayer(q))
-    delayer.node :=? x
     delayer.node
   }
 }

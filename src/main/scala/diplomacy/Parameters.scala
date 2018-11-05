@@ -3,7 +3,7 @@
 package freechips.rocketchip.diplomacy
 
 import Chisel._
-import freechips.rocketchip.util.ShiftQueue
+import freechips.rocketchip.util.{ShiftQueue, RationalDirection, FastToSlow, AsyncQueueParams}
 
 /** Options for memory regions */
 object RegionType {
@@ -25,7 +25,7 @@ object RegionType {
 case class IdRange(start: Int, end: Int) extends Ordered[IdRange]
 {
   require (start >= 0, s"Ids cannot be negative, but got: $start.")
-  require (start < end, "Id ranges cannot be empty.")
+  require (start <= end, "Id ranges cannot be negative.")
 
   def compare(x: IdRange) = {
     val primary   = (this.start - x.start).signum
@@ -35,11 +35,12 @@ case class IdRange(start: Int, end: Int) extends Ordered[IdRange]
 
   def overlaps(x: IdRange) = start < x.end && x.start < end
   def contains(x: IdRange) = start <= x.start && x.end <= end
-  // contains => overlaps (because empty is forbidden)
 
   def contains(x: Int)  = start <= x && x < end
   def contains(x: UInt) =
-    if (size == 1) { // simple comparison
+    if (size == 0) {
+      Bool(false)
+    } else if (size == 1) { // simple comparison
       x === UInt(start)
     } else {
       // find index of largest different bit
@@ -56,6 +57,7 @@ case class IdRange(start: Int, end: Int) extends Ordered[IdRange]
 
   def shift(x: Int) = IdRange(start+x, end+x)
   def size = end - start
+  def isEmpty = end == start
   
   def range = start until end
 }
@@ -104,40 +106,6 @@ object TransferSizes {
   implicit def asBool(x: TransferSizes) = !x.none
 }
 
-// Use AddressSet instead -- this is just for pretty printing
-case class AddressRange(base: BigInt, size: BigInt) extends Ordered[AddressRange]
-{
-  val end = base + size
-
-  require (base >= 0, s"AddressRange base must be positive, got: $base")
-  require (size > 0, s"AddressRange size must be > 0, got: $size")
-
-  def compare(x: AddressRange) = {
-    val primary   = (this.base - x.base).signum
-    val secondary = (x.size - this.size).signum
-    if (primary != 0) primary else secondary
-  }
-
-  def contains(x: AddressRange) = base <= x.base && x.end <= end
-  def union(x: AddressRange): Option[AddressRange] = {
-    if (base > x.end || x.base > end) {
-      None
-    } else {
-      val obase = if (base < x.base) base else x.base
-      val oend  = if (end  > x.end)  end  else x.end
-      Some(AddressRange(obase, oend-obase))
-    }
-  }
-
-  private def helper(base: BigInt, end: BigInt) =
-    if (base < end) Seq(AddressRange(base, end-base)) else Nil
-  def subtract(x: AddressRange) =
-    helper(base, end min x.base) ++ helper(base max x.end, end)
-
-  // We always want to see things in hex
-  override def toString() = "AddressRange(0x%x, 0x%x)".format(base, size)
-}
-
 // AddressSets specify the address space managed by the manager
 // Base is the base address, and mask are the bits consumed by the manager
 // e.g: base=0x200, mask=0xff describes a device managing 0x200-0x2ff
@@ -182,6 +150,16 @@ case class AddressSet(base: BigInt, mask: BigInt) extends Ordered[AddressSet]
     }
   }
 
+  def subtract(x: AddressSet): Seq[AddressSet] = {
+    if (!overlaps(x)) {
+      Seq(this)
+    } else {
+      val new_inflex = ~x.mask & mask
+      val fracture = AddressSet.enumerateMask(new_inflex).flatMap(m => intersect(AddressSet(m, ~new_inflex)))
+      fracture.filter(!_.overlaps(x))
+    }
+  }
+
   // AddressSets have one natural Ordering (the containment order, if contiguous)
   def compare(x: AddressSet) = {
     val primary   = (this.base - x.base).signum // smallest address first
@@ -208,24 +186,6 @@ case class AddressSet(base: BigInt, mask: BigInt) extends Ordered[AddressSet]
       AddressRange(off, size)
     }
   }
-}
-
-object AddressRange
-{
-  def fromSets(seq: Seq[AddressSet]): Seq[AddressRange] = unify(seq.flatMap(_.toRanges))
-  def unify(seq: Seq[AddressRange]): Seq[AddressRange] = {
-    if (seq.isEmpty) return Nil
-    val ranges = seq.sorted
-    ranges.tail.foldLeft(Seq(ranges.head)) { case (head :: tail, x) =>
-      head.union(x) match {
-        case Some(z) => z :: tail
-        case None => x :: head :: tail
-      }
-    }.reverse
-  }
-  // Set subtraction... O(n*n) b/c I am lazy
-  def subtract(from: Seq[AddressRange], take: Seq[AddressRange]): Seq[AddressRange] =
-    take.foldLeft(from) { case (left, r) => left.flatMap { _.subtract(r) } }
 }
 
 object AddressSet
@@ -260,6 +220,24 @@ object AddressSet
     }}
     val out = (array zip filter) flatMap { case (a, f) => if (f) None else Some(a) }
     if (out.size != n) unify(out) else out.toList
+  }
+
+  def enumerateMask(mask: BigInt): Seq[BigInt] = {
+    def helper(id: BigInt): Seq[BigInt] =
+      if (id == mask) Seq(id) else id +: helper(((~mask | id) + 1) & mask)
+    helper(0)
+  }
+
+  def enumerateBits(mask: BigInt): Seq[BigInt] = {
+    def helper(x: BigInt): Seq[BigInt] = {
+      if (x == 0) {
+        Nil
+      } else {
+        val bit = x & (-x)
+        bit +: helper(x & ~bit)
+      }
+    }
+    helper(mask)
   }
 }
 
@@ -303,4 +281,21 @@ object TriStateValue
 {
   implicit def apply(value: Boolean): TriStateValue = TriStateValue(value, true)
   def unset = TriStateValue(false, false)
+}
+
+/** Enumerates the types of clock crossings generally supported by Diplomatic bus protocols  */
+sealed trait ClockCrossingType
+{
+  def sameClock = this match {
+    case _: SynchronousCrossing => true
+    case _ => false
+  }
+}
+
+case object NoCrossing // converts to SynchronousCrossing(BufferParams.none) via implicit def in package
+case class SynchronousCrossing(params: BufferParams = BufferParams.default) extends ClockCrossingType
+case class RationalCrossing(direction: RationalDirection = FastToSlow) extends ClockCrossingType
+case class AsynchronousCrossing(depth: Int = 8, sourceSync: Int = 3, sinkSync: Int = 3, safe: Boolean = true, narrow: Boolean = false) extends ClockCrossingType
+{
+  def asSinkParams = AsyncQueueParams(depth, sinkSync, safe, narrow)
 }

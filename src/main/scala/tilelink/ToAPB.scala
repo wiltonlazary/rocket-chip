@@ -3,15 +3,14 @@
 package freechips.rocketchip.tilelink
 
 import Chisel._
-import chisel3.internal.sourceinfo.SourceInfo
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.amba.apb._
 import scala.math.{min, max}
 import APBParameters._
 
-case class TLToAPBNode() extends MixedAdapterNode(TLImp, APBImp)(
-  dFn = { case TLClientPortParameters(clients, unsafeAtomics, minLatency) =>
+case class TLToAPBNode()(implicit valName: ValName) extends MixedAdapterNode(TLImp, APBImp)(
+  dFn = { case TLClientPortParameters(clients, minLatency) =>
     val masters = clients.map { case c => APBMasterParameters(name = c.name, nodePath = c.nodePath) }
     APBMasterPortParameters(masters)
   },
@@ -26,9 +25,10 @@ case class TLToAPBNode() extends MixedAdapterNode(TLImp, APBImp)(
         supportsGet        = if (s.supportsRead)  TransferSizes(1, beatBytes) else TransferSizes.none,
         supportsPutPartial = if (s.supportsWrite) TransferSizes(1, beatBytes) else TransferSizes.none,
         supportsPutFull    = if (s.supportsWrite) TransferSizes(1, beatBytes) else TransferSizes.none,
-        fifoId             = Some(0)) // a common FIFO domain
+        fifoId             = Some(0), // a common FIFO domain
+        mayDenyPut         = true)
     }
-    TLManagerPortParameters(managers, beatBytes, 1, 0)
+    TLManagerPortParameters(managers, beatBytes, 0, 1)
   })
 
 // The input side has either a flow queue (aFlow=true) or a pipe queue (aFlow=false)
@@ -38,12 +38,7 @@ class TLToAPB(val aFlow: Boolean = true)(implicit p: Parameters) extends LazyMod
   val node = TLToAPBNode()
 
   lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
-      val in = node.bundleIn
-      val out = node.bundleOut
-    }
-
-    ((io.in zip io.out) zip (node.edgesIn zip node.edgesOut)) foreach { case ((in, out), (edgeIn, edgeOut)) =>
+    (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
       val beatBytes = edgeOut.slave.beatBytes
       val lgBytes = log2Ceil(beatBytes)
 
@@ -68,6 +63,11 @@ class TLToAPB(val aFlow: Boolean = true)(implicit p: Parameters) extends LazyMod
       val a_sel    = a.valid && RegNext(!in.d.valid || in.d.ready)
       val a_write  = edgeIn.hasData(a.bits)
 
+      val enable_d = a_sel && !a_enable
+      val d_write  = RegEnable(a_write,       enable_d)
+      val d_source = RegEnable(a.bits.source, enable_d)
+      val d_size   = RegEnable(a.bits.size,   enable_d)
+
       when (a_sel)    { a_enable := Bool(true) }
       when (d.fire()) { a_enable := Bool(false) }
 
@@ -83,18 +83,23 @@ class TLToAPB(val aFlow: Boolean = true)(implicit p: Parameters) extends LazyMod
       d.valid := a_enable && out.pready
       assert (!d.valid || d.ready)
 
-      d.bits := edgeIn.AccessAck(a.bits, out.prdata, out.pslverr)
-      d.bits.opcode := Mux(a_write, TLMessages.AccessAck, TLMessages.AccessAckData)
+      d.bits.opcode  := Mux(d_write, TLMessages.AccessAck, TLMessages.AccessAckData)
+      d.bits.param   := UInt(0)
+      d.bits.size    := d_size
+      d.bits.source  := d_source
+      d.bits.sink    := UInt(0)
+      d.bits.denied  :=  d_write && out.pslverr
+      d.bits.data    := out.prdata
+      d.bits.corrupt := !d_write && out.pslverr
     }
   }
 }
 
 object TLToAPB
 {
-  // applied to the TL source node; y.node := TLToAPB()(x.node)
-  def apply(aFlow: Boolean = true)(x: TLOutwardNode)(implicit p: Parameters, sourceInfo: SourceInfo): APBOutwardNode = {
-    val apb = LazyModule(new TLToAPB(aFlow))
-    apb.node :=? x
-    apb.node
+  def apply(aFlow: Boolean = true)(implicit p: Parameters) =
+  {
+    val tl2apb = LazyModule(new TLToAPB(aFlow))
+    tl2apb.node
   }
 }

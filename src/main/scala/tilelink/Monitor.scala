@@ -8,30 +8,32 @@ import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util.{HeterogeneousBag, PlusArg}
 
-case class TLMonitorArgs(edge: () => Seq[TLEdge], sourceInfo: SourceInfo, p: Parameters)
+case class TLMonitorArgs(edge: TLEdge)
 
-abstract class TLMonitorBase(args: TLMonitorArgs) extends MonitorBase()(args.sourceInfo, args.p)
+abstract class TLMonitorBase(args: TLMonitorArgs) extends Module
 {
-  def legalize(bundle: TLBundleSnoop, edge: TLEdge, reset: Bool): Unit
-
-  lazy val module = new LazyModuleImp(this) {
-    val edges = args.edge()
-    val io = new Bundle {
-      val in = HeterogeneousBag(edges.map(p => new TLBundleSnoop(p.bundle))).flip
-    }
-
-    (edges zip io.in).foreach { case (e, in) => legalize(in, e, reset) }
+  val io = new Bundle {
+    val in = new TLBundleSnoop(args.edge.bundle).flip
   }
+
+  def legalize(bundle: TLBundleSnoop, edge: TLEdge, reset: Bool): Unit
+  legalize(io.in, args.edge, reset)
 }
 
 class TLMonitor(args: TLMonitorArgs) extends TLMonitorBase(args)
 {
   def extra = {
-    sourceInfo match {
+    args.edge.sourceInfo match {
       case SourceLine(filename, line, col) => s" (connected at $filename:$line:$col)"
       case _ => ""
     }
   }
+
+  def visible(address: UInt, source: UInt, edge: TLEdge) =
+    edge.client.clients.map { c =>
+      !c.sourceId.contains(source) ||
+      c.visibility.map(_.contains(address)).reduce(_ || _)
+    }.reduce(_ && _)
 
   def legalizeFormatA(bundle: TLBundleA, edge: TLEdge) {
     assert (TLMessages.isA(bundle.opcode), "'A' channel has invalid opcode" + extra)
@@ -41,14 +43,29 @@ class TLMonitor(args: TLMonitorArgs) extends TLMonitorBase(args)
     val is_aligned = edge.isAligned(bundle.address, bundle.size)
     val mask = edge.full_mask(bundle)
 
-    when (bundle.opcode === TLMessages.Acquire) {
-      assert (edge.manager.supportsAcquireBSafe(edge.address(bundle), bundle.size), "'A' channel carries Acquire type unsupported by manager" + extra)
-      assert (edge.client.supportsProbe(edge.source(bundle), bundle.size), "'A' channel carries Acquire from a client which does not support Probe" + extra)
-      assert (source_ok, "'A' channel Acquire carries invalid source ID" + extra)
-      assert (bundle.size >= UInt(log2Ceil(edge.manager.beatBytes)), "'A' channel Acquire smaller than a beat" + extra)
-      assert (is_aligned, "'A' channel Acquire address not aligned to size" + extra)
-      assert (TLPermissions.isGrow(bundle.param), "'A' channel Acquire carries invalid grow param" + extra)
-      assert (~bundle.mask === UInt(0), "'A' channel Acquire contains invalid mask" + extra)
+    assert (visible(edge.address(bundle), bundle.source, edge), "'A' channel carries an address illegal for the specified bank visibility")
+
+    when (bundle.opcode === TLMessages.AcquireBlock) {
+      assert (edge.manager.supportsAcquireBSafe(edge.address(bundle), bundle.size), "'A' channel carries AcquireBlock type unsupported by manager" + extra)
+      assert (edge.client.supportsProbe(edge.source(bundle), bundle.size), "'A' channel carries AcquireBlock from a client which does not support Probe" + extra)
+      assert (source_ok, "'A' channel AcquireBlock carries invalid source ID" + extra)
+      assert (bundle.size >= UInt(log2Ceil(edge.manager.beatBytes)), "'A' channel AcquireBlock smaller than a beat" + extra)
+      assert (is_aligned, "'A' channel AcquireBlock address not aligned to size" + extra)
+      assert (TLPermissions.isGrow(bundle.param), "'A' channel AcquireBlock carries invalid grow param" + extra)
+      assert (~bundle.mask === UInt(0), "'A' channel AcquireBlock contains invalid mask" + extra)
+      assert (!bundle.corrupt, "'A' channel AcquireBlock is corrupt" + extra)
+    }
+
+    when (bundle.opcode === TLMessages.AcquirePerm) {
+      assert (edge.manager.supportsAcquireBSafe(edge.address(bundle), bundle.size), "'A' channel carries AcquirePerm type unsupported by manager" + extra)
+      assert (edge.client.supportsProbe(edge.source(bundle), bundle.size), "'A' channel carries AcquirePerm from a client which does not support Probe" + extra)
+      assert (source_ok, "'A' channel AcquirePerm carries invalid source ID" + extra)
+      assert (bundle.size >= UInt(log2Ceil(edge.manager.beatBytes)), "'A' channel AcquirePerm smaller than a beat" + extra)
+      assert (is_aligned, "'A' channel AcquirePerm address not aligned to size" + extra)
+      assert (TLPermissions.isGrow(bundle.param), "'A' channel AcquirePerm carries invalid grow param" + extra)
+      assert (bundle.param =/= TLPermissions.NtoB, "'A' channel AcquirePerm requests NtoB" + extra)
+      assert (~bundle.mask === UInt(0), "'A' channel AcquirePerm contains invalid mask" + extra)
+      assert (!bundle.corrupt, "'A' channel AcquirePerm is corrupt" + extra)
     }
 
     when (bundle.opcode === TLMessages.Get) {
@@ -57,6 +74,7 @@ class TLMonitor(args: TLMonitorArgs) extends TLMonitorBase(args)
       assert (is_aligned, "'A' channel Get address not aligned to size" + extra)
       assert (bundle.param === UInt(0), "'A' channel Get carries invalid param" + extra)
       assert (bundle.mask === mask, "'A' channel Get contains invalid mask" + extra)
+      assert (!bundle.corrupt, "'A' channel Get is corrupt" + extra)
     }
 
     when (bundle.opcode === TLMessages.PutFullData) {
@@ -96,11 +114,14 @@ class TLMonitor(args: TLMonitorArgs) extends TLMonitorBase(args)
       assert (source_ok, "'A' channel Hint carries invalid source ID" + extra)
       assert (is_aligned, "'A' channel Hint address not aligned to size" + extra)
       assert (bundle.mask === mask, "'A' channel Hint contains invalid mask" + extra)
+      assert (!bundle.corrupt, "'A' channel Hint is corrupt" + extra)
     }
   }
 
   def legalizeFormatB(bundle: TLBundleB, edge: TLEdge) {
     assert (TLMessages.isB(bundle.opcode), "'B' channel has invalid opcode" + extra)
+
+    assert (visible(edge.address(bundle), bundle.source, edge), "'B' channel carries an address illegal for the specified bank visibility")
 
     // Reuse these subexpressions to save some firrtl lines
     val address_ok = edge.manager.containsSafe(edge.address(bundle))
@@ -115,6 +136,7 @@ class TLMonitor(args: TLMonitorArgs) extends TLMonitorBase(args)
       assert (is_aligned, "'B' channel Probe address not aligned to size" + extra)
       assert (TLPermissions.isCap(bundle.param), "'B' channel Probe carries invalid cap param" + extra)
       assert (bundle.mask === mask, "'B' channel Probe contains invalid mask" + extra)
+      assert (!bundle.corrupt, "'B' channel Probe is corrupt" + extra)
     }
 
     when (bundle.opcode === TLMessages.Get) {
@@ -124,6 +146,7 @@ class TLMonitor(args: TLMonitorArgs) extends TLMonitorBase(args)
       assert (is_aligned, "'B' channel Get address not aligned to size" + extra)
       assert (bundle.param === UInt(0), "'B' channel Get carries invalid param" + extra)
       assert (bundle.mask === mask, "'B' channel Get contains invalid mask" + extra)
+      assert (!bundle.corrupt, "'B' channel Get is corrupt" + extra)
     }
 
     when (bundle.opcode === TLMessages.PutFullData) {
@@ -168,6 +191,7 @@ class TLMonitor(args: TLMonitorArgs) extends TLMonitorBase(args)
       assert (legal_source, "'B' channel Hint carries source that is not first source" + extra)
       assert (is_aligned, "'B' channel Hint address not aligned to size" + extra)
       assert (bundle.mask === mask, "'B' channel Hint contains invalid mask" + extra)
+      assert (!bundle.corrupt, "'B' channel Hint is corrupt" + extra)
     }
   }
 
@@ -178,13 +202,15 @@ class TLMonitor(args: TLMonitorArgs) extends TLMonitorBase(args)
     val is_aligned = edge.isAligned(bundle.address, bundle.size)
     val address_ok = edge.manager.containsSafe(edge.address(bundle))
 
+    assert (visible(edge.address(bundle), bundle.source, edge), "'C' channel carries an address illegal for the specified bank visibility")
+
     when (bundle.opcode === TLMessages.ProbeAck) {
       assert (address_ok, "'C' channel ProbeAck carries unmanaged address" + extra)
       assert (source_ok, "'C' channel ProbeAck carries invalid source ID" + extra)
       assert (bundle.size >= UInt(log2Ceil(edge.manager.beatBytes)), "'C' channel ProbeAck smaller than a beat" + extra)
       assert (is_aligned, "'C' channel ProbeAck address not aligned to size" + extra)
       assert (TLPermissions.isReport(bundle.param), "'C' channel ProbeAck carries invalid report param" + extra)
-      assert (!bundle.error, "'C' channel ProbeAck carries an error" + extra)
+      assert (!bundle.corrupt, "'C' channel ProbeAck is corrupt" + extra)
     }
 
     when (bundle.opcode === TLMessages.ProbeAckData) {
@@ -202,7 +228,7 @@ class TLMonitor(args: TLMonitorArgs) extends TLMonitorBase(args)
       assert (bundle.size >= UInt(log2Ceil(edge.manager.beatBytes)), "'C' channel Release smaller than a beat" + extra)
       assert (is_aligned, "'C' channel Release address not aligned to size" + extra)
       assert (TLPermissions.isShrink(bundle.param), "'C' channel Release carries invalid shrink param" + extra)
-      assert (!bundle.error, "'C' channel Release carries an error" + extra)
+      assert (!bundle.corrupt, "'C' channel Release is corrupt" + extra)
     }
 
     when (bundle.opcode === TLMessages.ReleaseData) {
@@ -219,6 +245,7 @@ class TLMonitor(args: TLMonitorArgs) extends TLMonitorBase(args)
       assert (source_ok, "'C' channel AccessAck carries invalid source ID" + extra)
       assert (is_aligned, "'C' channel AccessAck address not aligned to size" + extra)
       assert (bundle.param === UInt(0), "'C' channel AccessAck carries invalid param" + extra)
+      assert (!bundle.corrupt, "'C' channel AccessAck is corrupt" + extra)
     }
 
     when (bundle.opcode === TLMessages.AccessAckData) {
@@ -233,6 +260,7 @@ class TLMonitor(args: TLMonitorArgs) extends TLMonitorBase(args)
       assert (source_ok, "'C' channel HintAck carries invalid source ID" + extra)
       assert (is_aligned, "'C' channel HintAck address not aligned to size" + extra)
       assert (bundle.param === UInt(0), "'C' channel HintAck carries invalid param" + extra)
+      assert (!bundle.corrupt, "'C' channel HintAck is corrupt" + extra)
     }
   }
 
@@ -240,13 +268,16 @@ class TLMonitor(args: TLMonitorArgs) extends TLMonitorBase(args)
     assert (TLMessages.isD(bundle.opcode), "'D' channel has invalid opcode" + extra)
 
     val source_ok = edge.client.contains(bundle.source)
-    val sink_ok = Bool(edge.manager.endSinkId == 0) || bundle.sink < UInt(edge.manager.endSinkId)
+    val sink_ok = bundle.sink < UInt(edge.manager.endSinkId)
+    val deny_put_ok = Bool(edge.manager.mayDenyPut)
+    val deny_get_ok = Bool(edge.manager.mayDenyGet)
 
     when (bundle.opcode === TLMessages.ReleaseAck) {
       assert (source_ok, "'D' channel ReleaseAck carries invalid source ID" + extra)
-      assert (sink_ok, "'D' channel ReleaseAck carries invalid sink ID" + extra)
       assert (bundle.size >= UInt(log2Ceil(edge.manager.beatBytes)), "'D' channel ReleaseAck smaller than a beat" + extra)
       assert (bundle.param === UInt(0), "'D' channel ReleaseeAck carries invalid param" + extra)
+      assert (!bundle.corrupt, "'D' channel ReleaseAck is corrupt" + extra)
+      assert (!bundle.denied, "'D' channel ReleaseAck is denied" + extra)
     }
 
     when (bundle.opcode === TLMessages.Grant) {
@@ -254,6 +285,9 @@ class TLMonitor(args: TLMonitorArgs) extends TLMonitorBase(args)
       assert (sink_ok, "'D' channel Grant carries invalid sink ID" + extra)
       assert (bundle.size >= UInt(log2Ceil(edge.manager.beatBytes)), "'D' channel Grant smaller than a beat" + extra)
       assert (TLPermissions.isCap(bundle.param), "'D' channel Grant carries invalid cap param" + extra)
+      assert (bundle.param =/= TLPermissions.toN, "'D' channel Grant carries toN param" + extra)
+      assert (!bundle.corrupt, "'D' channel Grant is corrupt" + extra)
+      assert (deny_put_ok || !bundle.denied, "'D' channel Grant is denied" + extra)
     }
 
     when (bundle.opcode === TLMessages.GrantData) {
@@ -261,32 +295,38 @@ class TLMonitor(args: TLMonitorArgs) extends TLMonitorBase(args)
       assert (sink_ok, "'D' channel GrantData carries invalid sink ID" + extra)
       assert (bundle.size >= UInt(log2Ceil(edge.manager.beatBytes)), "'D' channel GrantData smaller than a beat" + extra)
       assert (TLPermissions.isCap(bundle.param), "'D' channel GrantData carries invalid cap param" + extra)
+      assert (bundle.param =/= TLPermissions.toN, "'D' channel GrantData carries toN param" + extra)
+      assert (!bundle.denied || bundle.corrupt, "'D' channel GrantData is denied but not corrupt" + extra)
+      assert (deny_get_ok || !bundle.denied, "'D' channel GrantData is denied" + extra)
     }
 
     when (bundle.opcode === TLMessages.AccessAck) {
       assert (source_ok, "'D' channel AccessAck carries invalid source ID" + extra)
-      assert (sink_ok, "'D' channel AccessAck carries invalid sink ID" + extra)
       // size is ignored
       assert (bundle.param === UInt(0), "'D' channel AccessAck carries invalid param" + extra)
+      assert (!bundle.corrupt, "'D' channel AccessAck is corrupt" + extra)
+      assert (deny_put_ok || !bundle.denied, "'D' channel AccessAck is denied" + extra)
     }
 
     when (bundle.opcode === TLMessages.AccessAckData) {
       assert (source_ok, "'D' channel AccessAckData carries invalid source ID" + extra)
-      assert (sink_ok, "'D' channel AccessAckData carries invalid sink ID" + extra)
       // size is ignored
       assert (bundle.param === UInt(0), "'D' channel AccessAckData carries invalid param" + extra)
+      assert (!bundle.denied || bundle.corrupt, "'D' channel AccessAckData is denied but not corrupt" + extra)
+      assert (deny_get_ok || !bundle.denied, "'D' channel AccessAckData is denied" + extra)
     }
 
     when (bundle.opcode === TLMessages.HintAck) {
       assert (source_ok, "'D' channel HintAck carries invalid source ID" + extra)
-      assert (sink_ok, "'D' channel HintAck carries invalid sink ID" + extra)
       // size is ignored
       assert (bundle.param === UInt(0), "'D' channel HintAck carries invalid param" + extra)
+      assert (!bundle.corrupt, "'D' channel HintAck is corrupt" + extra)
+      assert (deny_put_ok || !bundle.denied, "'D' channel HintAck is denied" + extra)
     }
   }
 
   def legalizeFormatE(bundle: TLBundleE, edge: TLEdge) {
-    val sink_ok = Bool(edge.manager.endSinkId == 0) || bundle.sink < UInt(edge.manager.endSinkId)
+    val sink_ok = bundle.sink < UInt(edge.manager.endSinkId)
     assert (sink_ok, "'E' channels carries invalid sink ID" + extra)
   }
 
@@ -380,12 +420,14 @@ class TLMonitor(args: TLMonitorArgs) extends TLMonitorBase(args)
     val size    = Reg(UInt())
     val source  = Reg(UInt())
     val sink    = Reg(UInt())
+    val denied  = Reg(Bool())
     when (d.valid && !d_first) {
       assert (d.bits.opcode === opcode, "'D' channel opcode changed within multibeat operation" + extra)
       assert (d.bits.param  === param,  "'D' channel param changed within multibeat operation" + extra)
       assert (d.bits.size   === size,   "'D' channel size changed within multibeat operation" + extra)
       assert (d.bits.source === source, "'D' channel source changed within multibeat operation" + extra)
       assert (d.bits.sink   === sink,   "'D' channel sink changed with multibeat operation" + extra)
+      assert (d.bits.denied === denied, "'D' channel denied changed with multibeat operation" + extra)
     }
     when (d.fire() && d_first) {
       opcode  := d.bits.opcode
@@ -393,6 +435,7 @@ class TLMonitor(args: TLMonitorArgs) extends TLMonitorBase(args)
       size    := d.bits.size
       source  := d.bits.source
       sink    := d.bits.sink
+      denied  := d.bits.denied
     }
   }
 
@@ -431,7 +474,8 @@ class TLMonitor(args: TLMonitorArgs) extends TLMonitorBase(args)
     inflight := (inflight | a_set) & ~d_clr
 
     val watchdog = RegInit(UInt(0, width = 32))
-    val limit = PlusArg("tilelink_timeout")
+    val limit = PlusArg("tilelink_timeout",
+      docstring="Kill emulation after INT waiting TileLink cycles. Off if 0.")
     assert (!inflight.orR || limit === UInt(0) || watchdog < limit, "TileLink timeout expired" + extra)
 
     watchdog := watchdog + UInt(1)
@@ -469,7 +513,7 @@ class TLMonitor(args: TLMonitorArgs) extends TLMonitorBase(args)
     } else {
       legalizeADSource(bundle, edge)
     }
-    if (edge.client.anySupportProbe && edge.manager.anySupportAcquireB && edge.manager.endSinkId > 1) {
+    if (edge.client.anySupportProbe && edge.manager.anySupportAcquireB) {
       // legalizeBCSourceAddress(bundle, edge) // too much state needed to synthesize...
       val sinkBits = log2Ceil(edge.manager.endSinkId)
       if (sinkBits > tooBig) {

@@ -3,21 +3,26 @@
 package freechips.rocketchip.tilelink
 
 import Chisel._
+import chisel3.experimental.RawModule
+import firrtl.annotations.ModuleName
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper._
-import freechips.rocketchip.util.HeterogeneousBag
-import scala.math.{min,max}
+import freechips.rocketchip.interrupts._
+import freechips.rocketchip.util.{ElaborationArtefacts, GenRegDescsAnno, HeterogeneousBag}
 
-class TLRegisterNode(
+import scala.math.{max, min}
+
+case class TLRegisterNode(
     address:     Seq[AddressSet],
     device:      Device,
     deviceKey:   String  = "reg/control",
     concurrency: Int     = 0,
     beatBytes:   Int     = 4,
     undefZero:   Boolean = true,
-    executable:  Boolean = false)
-  extends TLManagerNode(Seq(TLManagerPortParameters(
+    executable:  Boolean = false)(
+    implicit valName: ValName)
+  extends SinkNode(TLImp)(Seq(TLManagerPortParameters(
     Seq(TLManagerParameters(
       address            = address,
       resources          = Seq(Resource(device, deviceKey)),
@@ -39,9 +44,9 @@ class TLRegisterNode(
   // Calling this method causes the matching TL2 bundle to be
   // configured to route all requests to the listed RegFields.
   def regmap(mapping: RegField.Map*) = {
-    val a = bundleIn(0).a
-    val d = bundleIn(0).d
-    val edge = edgesIn(0)
+    val (bundleIn, edge) = this.in(0)
+    val a = bundleIn.a
+    val d = bundleIn.d
 
     // Please forgive me ...
     val baseEnd = 0
@@ -75,52 +80,66 @@ class TLRegisterNode(
     d.bits.opcode := Mux(out.bits.read, TLMessages.AccessAckData, TLMessages.AccessAck)
 
     // Tie off unused channels
-    bundleIn(0).b.valid := Bool(false)
-    bundleIn(0).c.ready := Bool(true)
-    bundleIn(0).e.ready := Bool(true)
+    bundleIn.b.valid := Bool(false)
+    bundleIn.c.ready := Bool(true)
+    bundleIn.e.ready := Bool(true)
+
+    genRegDescsJson(mapping:_*)
+  }
+
+
+  def genRegDescsJson(mapping: RegField.Map*) {
+    // Dump out the register map for documentation purposes.
+    val base = address.head.base
+    val baseHex = s"0x${base.toInt.toHexString}"
+    val name = s"deviceAt${baseHex}" //TODO: It would be better to name this other than "Device at ...."
+    val json = GenRegDescsAnno.serialize(base, name, mapping:_*)
+    var suffix = 0
+    while( ElaborationArtefacts.contains(s"${baseHex}.${suffix}.regmap.json")) {
+      suffix = suffix + 1
+    }
+    ElaborationArtefacts.add(s"${baseHex}.${suffix}.regmap.json", json)
+
+    val module = Module.currentModule.get.asInstanceOf[RawModule]
+    GenRegDescsAnno.anno(
+      module,
+      base,
+      mapping:_*)
+
   }
 }
 
-object TLRegisterNode
-{
-  def apply(
-      address:     Seq[AddressSet],
-      device:      Device,
-      deviceKey:   String  = "reg/control",
-      concurrency: Int     = 0,
-      beatBytes:   Int     = 4,
-      undefZero:   Boolean = true,
-      executable:  Boolean = false) =
-    new TLRegisterNode(address, device, deviceKey, concurrency, beatBytes, undefZero, executable)
-}
-
-// These convenience methods below combine to make it possible to create a TL2 
 // register mapped device from a totally abstract register mapped device.
-// See GPIO.scala in this directory for an example
 
 abstract class TLRegisterRouterBase(devname: String, devcompat: Seq[String], val address: AddressSet, interrupts: Int, concurrency: Int, beatBytes: Int, undefZero: Boolean, executable: Boolean)(implicit p: Parameters) extends LazyModule
 {
-  val device = new SimpleDevice(devname, devcompat)
+  // Allow devices to extend the DTS mapping
+  def extraResources(resources: ResourceBindings) = Map[String, Seq[ResourceValue]]()
+  val device = new SimpleDevice(devname, devcompat) {
+    override def describe(resources: ResourceBindings): Description = {
+      val Description(name, mapping) = super.describe(resources)
+      Description(name, mapping ++ extraResources(resources))
+    }
+  }
+
   val node = TLRegisterNode(Seq(address), device, "reg/control", concurrency, beatBytes, undefZero, executable)
   val intnode = IntSourceNode(IntSourcePortSimple(num = interrupts, resources = Seq(Resource(device, "int"))))
 }
 
-case class TLRegBundleArg(interrupts: HeterogeneousBag[Vec[Bool]], in: HeterogeneousBag[TLBundle])(implicit val p: Parameters)
+case class TLRegBundleArg()(implicit val p: Parameters)
 
 class TLRegBundleBase(arg: TLRegBundleArg) extends Bundle
 {
   implicit val p = arg.p
-  val interrupts = arg.interrupts
-  val in = arg.in
 }
 
-class TLRegBundle[P](val params: P, arg: TLRegBundleArg)(implicit p: Parameters) extends TLRegBundleBase(arg)
+class TLRegBundle[P](val params: P, val arg: TLRegBundleArg) extends TLRegBundleBase(arg)
 
 class TLRegModule[P, B <: TLRegBundleBase](val params: P, bundleBuilder: => B, router: TLRegisterRouterBase)
   extends LazyModuleImp(router) with HasRegMap
 {
-  val io = bundleBuilder
-  val interrupts = if (io.interrupts.isEmpty) Vec(0, Bool()) else io.interrupts(0)
+  val io = IO(bundleBuilder)
+  val interrupts = if (router.intnode.out.isEmpty) Vec(0, Bool()) else router.intnode.out(0)._1
   val address = router.address
   def regmap(mapping: RegField.Map*) = router.node.regmap(mapping:_*)
 }
@@ -142,5 +161,25 @@ class TLRegisterRouter[B <: TLRegBundleBase, M <: LazyModuleImp](
   require (isPow2(size))
   // require (size >= 4096) ... not absolutely required, but highly recommended
 
-  lazy val module = moduleBuilder(bundleBuilder(TLRegBundleArg(intnode.bundleOut, node.bundleIn)), this)
+  lazy val module = moduleBuilder(bundleBuilder(TLRegBundleArg()), this)
+}
+
+// !!! eliminate third trait
+
+/** Mix this trait into a RegisterRouter to be able to attach its register map to a TL bus */
+trait HasTLControlRegMap { this: RegisterRouter[_] =>
+  protected val controlNode = TLRegisterNode(
+    address = address,
+    device = device,
+    deviceKey = "reg/control",
+    concurrency = concurrency,
+    beatBytes = beatBytes,
+    undefZero = undefZero,
+    executable = executable)
+
+  // Externally, this helper should be used to connect the register control port to a bus
+  val controlXing: TLInwardCrossingHelper = this.crossIn(controlNode)
+
+  // Internally, this function should be used to populate the control port with registers
+  protected def regmap(mapping: RegField.Map*) { controlNode.regmap(mapping:_*) }
 }

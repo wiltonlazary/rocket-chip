@@ -4,7 +4,7 @@ package freechips.rocketchip.devices.tilelink
 
 import Chisel._
 import freechips.rocketchip.config.{Field, Parameters}
-import freechips.rocketchip.coreplex._
+import freechips.rocketchip.subsystem.{BaseSubsystem, HasResetVectorWire}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
@@ -23,25 +23,22 @@ case object BootROMParams extends Field[BootROMParams]
 class TLROM(val base: BigInt, val size: Int, contentsDelayed: => Seq[Byte], executable: Boolean = true, beatBytes: Int = 4,
   resources: Seq[Resource] = new SimpleDevice("rom", Seq("sifive,rom0")).reg("mem"))(implicit p: Parameters) extends LazyModule
 {
-  val node = TLManagerNode(beatBytes, TLManagerParameters (
-    address     = List(AddressSet(base, size-1)),
-    resources   = resources,
-    regionType  = RegionType.UNCACHED,
-    executable  = executable,
-    supportsGet = TransferSizes(1, beatBytes),
-    fifoId      = Some(0)))
+  val node = TLManagerNode(Seq(TLManagerPortParameters(
+    Seq(TLManagerParameters(
+      address     = List(AddressSet(base, size-1)),
+      resources   = resources,
+      regionType  = RegionType.UNCACHED,
+      executable  = executable,
+      supportsGet = TransferSizes(1, beatBytes),
+      fifoId      = Some(0))),
+    beatBytes = beatBytes)))
 
   lazy val module = new LazyModuleImp(this) {
-    val io = new Bundle {
-      val in = node.bundleIn
-    }
-
     val contents = contentsDelayed
     val wrapSize = 1 << log2Ceil(contents.size)
     require (wrapSize <= size)
 
-    val in = io.in(0)
-    val edge = node.edgesIn(0)
+    val (in, edge) = node.in(0)
 
     val words = (contents ++ Seq.fill(wrapSize-contents.size)(0.toByte)).grouped(beatBytes).toSeq
     val bigs = words.map(_.foldRight(BigInt(0)){ case (x,y) => (x.toInt & 0xff) | y << 8})
@@ -61,8 +58,8 @@ class TLROM(val base: BigInt, val size: Int, contentsDelayed: => Seq[Byte], exec
   }
 }
 
-/** Adds a boot ROM that contains the DTB describing the system's coreplex. */
-trait HasPeripheryBootROM extends HasPeripheryBus {
+/** Adds a boot ROM that contains the DTB describing the system's subsystem. */
+trait HasPeripheryBootROM { this: BaseSubsystem =>
   val dtb: DTB
   private val params = p(BootROMParams)
   private lazy val contents = {
@@ -72,13 +69,13 @@ trait HasPeripheryBootROM extends HasPeripheryBus {
   }
   def resetVector: BigInt = params.hang
 
-  val bootrom = LazyModule(new TLROM(params.address, params.size, contents, true, pbus.beatBytes))
+  val bootrom = LazyModule(new TLROM(params.address, params.size, contents, true, cbus.beatBytes))
 
-  bootrom.node := pbus.toVariableWidthSlaves
+  bootrom.node := cbus.coupleTo("bootrom"){ TLFragmenter(cbus) := _ }
 }
 
-/** Coreplex will power-on running at 0x10040 (BootROM) */
-trait HasPeripheryBootROMModuleImp extends LazyMultiIOModuleImp
+/** Subsystem will power-on running at 0x10040 (BootROM) */
+trait HasPeripheryBootROMModuleImp extends LazyModuleImp
     with HasResetVectorWire {
   val outer: HasPeripheryBootROM
   global_reset_vector := outer.resetVector.U

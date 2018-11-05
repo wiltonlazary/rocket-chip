@@ -5,7 +5,9 @@ package freechips.rocketchip.tile
 import Chisel._
 
 import freechips.rocketchip.config._
+import freechips.rocketchip.subsystem._
 import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.interrupts._
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
@@ -15,12 +17,20 @@ case object TileKey extends Field[TileParams]
 case object ResetVectorBits extends Field[Int]
 case object MaxHartIdBits extends Field[Int]
 
+abstract class LookupByHartIdImpl {
+  def apply[T <: Data](f: TileParams => Option[T], hartId: UInt): T
+}
+case object LookupByHartId extends Field[LookupByHartIdImpl]
+
 trait TileParams {
   val core: CoreParams
   val icache: Option[ICacheParams]
   val dcache: Option[DCacheParams]
-  val rocc: Seq[RoCCParams]
   val btb: Option[BTBParams]
+  val trace: Boolean
+  val hartId: Int
+  val blockerCtrlAddr: Option[BigInt]
+  val name: Option[String]
 }
 
 trait HasTileParameters {
@@ -30,16 +40,26 @@ trait HasTileParameters {
   def usingVM: Boolean = tileParams.core.useVM
   def usingUser: Boolean = tileParams.core.useUser || usingVM
   def usingDebug: Boolean = tileParams.core.useDebug
-  def usingRoCC: Boolean = !tileParams.rocc.isEmpty
+  def usingRoCC: Boolean = !p(BuildRoCC).isEmpty
   def usingBTB: Boolean = tileParams.btb.isDefined && tileParams.btb.get.nEntries > 0
   def usingPTW: Boolean = usingVM
   def usingDataScratchpad: Boolean = tileParams.dcache.flatMap(_.scratch).isDefined
 
   def xLen: Int = p(XLen)
   def xBytes: Int = xLen / 8
+  def iLen: Int = 32
   def pgIdxBits: Int = 12
   def pgLevelBits: Int = 10 - log2Ceil(xLen / 32)
-  def vaddrBits: Int = pgIdxBits + pgLevels * pgLevelBits
+  def vaddrBits: Int =
+    if (usingVM) {
+      val v = pgIdxBits + pgLevels * pgLevelBits
+      require(v == xLen || xLen > v && v > paddrBits)
+      v
+    } else {
+      // since virtual addresses sign-extend but physical addresses
+      // zero-extend, make room for a zero sign bit for physical addresses
+      (paddrBits + 1) min xLen
+    }
   def paddrBits: Int = p(SharedMemoryTLEdge).bundle.addressBits
   def vpnBits: Int = vaddrBits - pgIdxBits
   def ppnBits: Int = paddrBits - pgIdxBits
@@ -49,65 +69,149 @@ trait HasTileParameters {
   def vaddrBitsExtended: Int = vpnBitsExtended + pgIdxBits
   def maxPAddrBits: Int = xLen match { case 32 => 34; case 64 => 56 }
 
+  def hartId: Int = tileParams.hartId
   def hartIdLen: Int = p(MaxHartIdBits)
-  def resetVectorLen: Int = paddrBits min vaddrBitsExtended
+  def resetVectorLen: Int = paddrBits
 
-  def dcacheArbPorts = 1 + usingVM.toInt + usingDataScratchpad.toInt + tileParams.rocc.size
+  def cacheBlockBytes = p(CacheBlockBytes)
+  def lgCacheBlockBytes = log2Up(cacheBlockBytes)
+  def masterPortBeatBytes = p(SystemBusKey).beatBytes
+
+  // TODO make HellaCacheIO diplomatic and remove this brittle collection of hacks
+  //                  Core   PTW                DTIM                    coprocessors           
+  def dcacheArbPorts = 1 + usingVM.toInt + usingDataScratchpad.toInt + p(BuildRoCC).size
+
+  // TODO merge with isaString in CSR.scala
+  def isaDTS: String = {
+    val m = if (tileParams.core.mulDiv.nonEmpty) "m" else ""
+    val a = if (tileParams.core.useAtomics) "a" else ""
+    val f = if (tileParams.core.fpu.nonEmpty) "f" else ""
+    val d = if (tileParams.core.fpu.nonEmpty && tileParams.core.fpu.get.fLen > 32) "d" else ""
+    val c = if (tileParams.core.useCompressed) "c" else ""
+    s"rv${p(XLen)}i$m$a$f$d$c"
+  }
+
+  def tileProperties: PropertyMap = {
+    val dcache = tileParams.dcache.filter(!_.scratch.isDefined).map(d => Map(
+      "d-cache-block-size"   -> cacheBlockBytes.asProperty,
+      "d-cache-sets"         -> d.nSets.asProperty,
+      "d-cache-size"         -> (d.nSets * d.nWays * cacheBlockBytes).asProperty)
+    ).getOrElse(Nil)
+
+    val incoherent = if (!tileParams.core.useAtomicsOnlyForIO) Nil else Map(
+      "sifive,d-cache-incoherent" -> Nil)
+
+    val icache = tileParams.icache.map(i => Map(
+      "i-cache-block-size"   -> cacheBlockBytes.asProperty,
+      "i-cache-sets"         -> i.nSets.asProperty,
+      "i-cache-size"         -> (i.nSets * i.nWays * cacheBlockBytes).asProperty)
+    ).getOrElse(Nil)
+
+    val dtlb = tileParams.dcache.filter(_ => tileParams.core.useVM).map(d => Map(
+      "d-tlb-size"           -> d.nTLBEntries.asProperty,
+      "d-tlb-sets"           -> 1.asProperty)).getOrElse(Nil)
+
+    val itlb = tileParams.icache.filter(_ => tileParams.core.useVM).map(i => Map(
+      "i-tlb-size"           -> i.nTLBEntries.asProperty,
+      "i-tlb-sets"           -> 1.asProperty)).getOrElse(Nil)
+
+    val mmu = if (!tileParams.core.useVM) Nil else Map(
+        "tlb-split" -> Nil,
+        "mmu-type"  -> (p(PgLevels) match {
+          case 2 => "riscv,sv32"
+          case 3 => "riscv,sv39"
+          case 4 => "riscv,sv48"
+        }).asProperty)
+
+    dcache ++ icache ++ dtlb ++ itlb ++ mmu ++ incoherent
+  }
+
 }
 
-abstract class BareTile(implicit p: Parameters) extends LazyModule
+/** Base class for all Tiles that use TileLink */
+abstract class BaseTile(tileParams: TileParams, val crossing: ClockCrossingType)
+                       (implicit p: Parameters)
+    extends LazyModule with CrossesToOnlyOneClockDomain with HasTileParameters {
+  def module: BaseTileModuleImp[BaseTile]
+  def masterNode: TLOutwardNode
+  def slaveNode: TLInwardNode
+  def intInwardNode: IntInwardNode
+  def intOutwardNode: IntOutwardNode
 
-abstract class BareTileBundle[+L <: BareTile](_outer: L) extends GenericParameterizedBundle(_outer) {
-  val outer = _outer
-  implicit val p = outer.p
+  protected val tlOtherMastersNode = TLIdentityNode()
+  protected val tlMasterXbar = LazyModule(new TLXbar)
+  protected val tlSlaveXbar = LazyModule(new TLXbar)
+  protected val intXbar = LazyModule(new IntXbar)
+
+  def connectTLSlave(node: TLNode, bytes: Int) {
+    DisableMonitors { implicit p =>
+      (Seq(node, TLFragmenter(bytes, cacheBlockBytes, earlyAck=EarlyAck.PutFulls))
+        ++ (xBytes != bytes).option(TLWidthWidget(xBytes)))
+        .foldRight(tlSlaveXbar.node:TLOutwardNode)(_ :*= _)
+    }
+  }
+
+  // Find resource labels for all the outward caches
+  def nextLevelCacheProperty: PropertyOption = {
+    val outer = tlMasterXbar.node.edges.out
+      .flatMap(_.manager.managers)
+      .filter(_.supportsAcquireB)
+      .flatMap(_.resources.headOption)
+      .map(_.owner.label)
+      .distinct
+    if (outer.isEmpty) None
+    else Some("next-level-cache" -> outer.map(l => ResourceReference(l)).toList)
+  }
+
+  def cpuProperties: PropertyMap = Map(
+      "device_type"          -> "cpu".asProperty,
+      "status"               -> "okay".asProperty,
+      "clock-frequency"      -> tileParams.core.bootFreqHz.asProperty,
+      "riscv,isa"            -> isaDTS.asProperty,
+      "timebase-frequency"   -> p(DTSTimebase).asProperty)
+
+  // The boundary buffering needed to cut feed-through paths is
+  // microarchitecture specific, so these may need to be overridden
+  protected def makeMasterBoundaryBuffers(implicit p: Parameters) = TLBuffer(BufferParams.none)
+  def crossMasterPort(): TLOutwardNode = {
+    val tlMasterXing = this.crossOut(crossing match {
+      case RationalCrossing(_) => this { makeMasterBoundaryBuffers } :=* masterNode
+      case _ => masterNode
+    })
+    tlMasterXing(crossing)
+  }
+
+  protected def makeSlaveBoundaryBuffers(implicit p: Parameters) = TLBuffer(BufferParams.none)
+  def crossSlavePort(): TLInwardNode = { DisableMonitors { implicit p =>
+    val tlSlaveXing = this.crossIn(crossing match {
+      case RationalCrossing(_) => slaveNode :*= this { makeSlaveBoundaryBuffers }
+      case _ => slaveNode
+    })
+    tlSlaveXing(crossing)
+  } }
+
+  def crossIntIn(): IntInwardNode = crossIntIn(intInwardNode)
+  def crossIntOut(): IntOutwardNode = crossIntOut(intOutwardNode)
 }
 
-abstract class BareTileModule[+L <: BareTile, +B <: BareTileBundle[L]](_outer: L, _io: () => B) extends LazyModuleImp(_outer) {
-  val outer = _outer
-  val io = _io ()
+abstract class BaseTileModuleImp[+L <: BaseTile](val outer: L) extends LazyModuleImp(outer) with HasTileParameters {
+
+  require(xLen == 32 || xLen == 64)
+  require(paddrBits <= maxPAddrBits)
+  require(resetVectorLen <= xLen)
+  require(resetVectorLen <= vaddrBitsExtended)
+  require (log2Up(hartId + 1) <= hartIdLen, s"p(MaxHartIdBits) of $hartIdLen is not enough for hartid $hartId")
+
+  val trace = tileParams.trace.option(IO(Vec(tileParams.core.retireWidth, new TracedInstruction).asOutput))
+  val constants = IO(new TileInputConstants)
+
+  val halt_and_catch_fire: Option[Bool]
 }
 
-/** Uses TileLink master port to connect caches and accelerators to the coreplex */
-trait HasTileLinkMasterPort {
-  implicit val p: Parameters
-  val module: HasTileLinkMasterPortModule
-  val masterNode = TLOutputNode()
-  val tileBus = LazyModule(new TLXbar) // TileBus xbar for cache backends to connect to
-  masterNode := tileBus.node
-}
-
-trait HasTileLinkMasterPortBundle {
-  val outer: HasTileLinkMasterPort
-  val master = outer.masterNode.bundleOut
-}
-
-trait HasTileLinkMasterPortModule {
-  val outer: HasTileLinkMasterPort
-  val io: HasTileLinkMasterPortBundle
-}
-
-/** Some other standard inputs */
+/** Some other non-tilelink but still standard inputs */
 trait HasExternallyDrivenTileConstants extends Bundle with HasTileParameters {
   val hartid = UInt(INPUT, hartIdLen)
   val reset_vector = UInt(INPUT, resetVectorLen)
 }
 
-/** Base class for all Tiles that use TileLink */
-abstract class BaseTile(tileParams: TileParams)(implicit p: Parameters) extends BareTile
-    with HasTileParameters
-    with HasTileLinkMasterPort {
-  override lazy val module = new BaseTileModule(this, () => new BaseTileBundle(this))
-}
-
-class BaseTileBundle[+L <: BaseTile](_outer: L) extends BareTileBundle(_outer)
-    with HasTileLinkMasterPortBundle
-    with HasExternallyDrivenTileConstants
-
-class BaseTileModule[+L <: BaseTile, +B <: BaseTileBundle[L]](_outer: L, _io: () => B) extends BareTileModule(_outer, _io)
-    with HasTileParameters
-    with HasTileLinkMasterPortModule {
-  require(xLen == 32 || xLen == 64)
-  require(paddrBits <= maxPAddrBits)
-  require(resetVectorLen <= xLen)
-  require(resetVectorLen <= vaddrBitsExtended)
-}
+class TileInputConstants(implicit val p: Parameters) extends ParameterizedBundle with HasExternallyDrivenTileConstants
